@@ -1,0 +1,952 @@
+{
+  "version": "1.0",
+  "pipelines": [
+    {
+      "pipeline_name": "literature_harvest",
+      "intent": "literature_harvest",
+      "trigger_phrases": [
+        "\\u6587\\u732e\\u91c7\\u96c6",
+        "\\u641c\\u7d22\\u6587\\u732e",
+        "\\u4e0b\\u8f7d\\u8bba\\u6587",
+        "\\u4e0b\\u8f7d",
+        "keyword harvest",
+        "literature harvest",
+        "download literature"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "compliant-literature-access",
+        "extract-first-article-keywords",
+        "build-user-research-kb"
+      ],
+      "required_inputs": [
+        "keywords",
+        "project_id"
+      ],
+      "expected_outputs": [
+        "paper_table",
+        "downloaded_pdfs",
+        "ingestion_status"
+      ],
+      "validation_rules": [
+        "check compliance requirements",
+        "article evidence must retain source_ids",
+        "do not bypass paywalls"
+      ],
+      "promotion_targets": [
+        "papers",
+        "claims",
+        "project memory",
+        "context index"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "file_writer"
+      ],
+      "brain_responsibilities": [
+        "define search scope",
+        "check compliance requirements",
+        "validate article evidence",
+        "update Research Brain and Context Index",
+        "decide skill crystallization"
+      ],
+      "execution_responsibilities": [
+        "run compliant access",
+        "extract article keywords",
+        "build local KB"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "browser_research_learning",
+      "intent": "browser_research_learning",
+      "trigger_phrases": [
+        "\\u6d4f\\u89c8\\u5668\\u5b66\\u4e60",
+        "\\u7f51\\u9875\\u5b66\\u4e60",
+        "browser learning",
+        "learn this website"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "browser-research-learning"
+      ],
+      "required_inputs": [
+        "url",
+        "user_authorization"
+      ],
+      "expected_outputs": [
+        "browser_learning_evidence"
+      ],
+      "validation_rules": [
+        "requires user authorization",
+        "no CAPTCHA, MFA, SSO, paywall, or anti-bot bypass",
+        "browser records are not peer-reviewed evidence"
+      ],
+      "promotion_targets": [
+        "browser_learning evidence",
+        "project memory",
+        "low-confidence notes"
+      ],
+      "auto_crystallize_candidate": false,
+      "requires_user_authorization": true,
+      "risk_level": "high",
+      "allowed_tools": [
+        "context_lookup"
+      ],
+      "brain_responsibilities": [
+        "request authorization",
+        "downgrade confidence",
+        "decide whether notes enter memory"
+      ],
+      "execution_responsibilities": [
+        "only visit authorized pages",
+        "record browser learning evidence"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "research_route_planning",
+      "intent": "research_route_planning",
+      "trigger_phrases": [
+        "\\u89c4\\u5212\\u7814\\u7a76\\u8def\\u7ebf",
+        "\\u9879\\u76ee\\u8def\\u7ebf",
+        "research route",
+        "research planning"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "plan-research-route",
+        "ingest-research-evidence"
+      ],
+      "required_inputs": [
+        "project_context"
+      ],
+      "expected_outputs": [
+        "research_plan",
+        "evidence_items"
+      ],
+      "validation_rules": [
+        "separate project data from literature evidence",
+        "uncertain suggestions stay draft"
+      ],
+      "promotion_targets": [
+        "project memory",
+        "decisions",
+        "workflows"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "context_lookup"
+      ],
+      "brain_responsibilities": [
+        "define project route",
+        "write decisions after review"
+      ],
+      "execution_responsibilities": [
+        "run route planning and evidence ingest skills"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "protocol_to_sop",
+      "intent": "protocol_to_sop",
+      "trigger_phrases": [
+        "Methods \\u8f6c SOP",
+        "method to SOP",
+        "protocol to sop",
+        "\\u751f\\u6210 SOP"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "protocol-extraction",
+        "sop-generation"
+      ],
+      "required_inputs": [
+        "method_text"
+      ],
+      "expected_outputs": [
+        "protocol",
+        "sop"
+      ],
+      "validation_rules": [
+        "preserve source protocol",
+        "mark inferred steps",
+        "human confirmation before wet-lab use"
+      ],
+      "promotion_targets": [
+        "protocols",
+        "experiments",
+        "decisions"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "validate protocol provenance",
+        "decide if SOP is usable"
+      ],
+      "execution_responsibilities": [
+        "extract protocol then generate SOP"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "experiment_design",
+      "intent": "experiment_design",
+      "trigger_phrases": [
+        "\\u5b9e\\u9a8c\\u8bbe\\u8ba1",
+        "\\u5b9e\\u9a8c\\u5206\\u7ec4",
+        "experiment design",
+        "design experiment"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "design-experiment-matrix"
+      ],
+      "required_inputs": [
+        "objective",
+        "constraints"
+      ],
+      "expected_outputs": [
+        "experiment_matrix"
+      ],
+      "validation_rules": [
+        "include controls",
+        "report missing replicates",
+        "mark assumptions"
+      ],
+      "promotion_targets": [
+        "experiments",
+        "protocols",
+        "decisions"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "ensure design matches project context"
+      ],
+      "execution_responsibilities": [
+        "build experiment matrix"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "data_analysis_to_narrative",
+      "intent": "data_analysis_to_narrative",
+      "trigger_phrases": [
+        "\\u5206\\u6790 CSV \\u5e76\\u5199\\u7ed3\\u679c\\u6bb5",
+        "\\u5206\\u6790\\u6570\\u636e\\u5199\\u7ed3\\u679c",
+        "data analysis narrative",
+        "parse csv and write results"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "parse-scientific-data",
+        "analyze-experiment-results",
+        "result-narrative"
+      ],
+      "required_inputs": [
+        "data_file"
+      ],
+      "expected_outputs": [
+        "structured_data",
+        "analysis_result",
+        "narrative"
+      ],
+      "validation_rules": [
+        "do not claim significance without statistical evidence",
+        "no raw replicate values means low-confidence conclusion",
+        "missing values and uncertainty must be reported"
+      ],
+      "promotion_targets": [
+        "datasets",
+        "claims",
+        "decisions",
+        "reports"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "data_parser",
+        "csv_writer",
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "validate claims and confidence",
+        "promote supported outputs"
+      ],
+      "execution_responsibilities": [
+        "parse data",
+        "analyze results",
+        "write narrative"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "failure_recovery",
+      "intent": "failure_recovery",
+      "trigger_phrases": [
+        "\\u5b9e\\u9a8c\\u5931\\u8d25\\u590d\\u76d8",
+        "\\u5931\\u8d25\\u8bb0\\u5f55",
+        "failure recovery",
+        "diagnose bottleneck"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "failure-log",
+        "diagnose-research-bottleneck"
+      ],
+      "required_inputs": [
+        "failure_description"
+      ],
+      "expected_outputs": [
+        "failure_memory",
+        "diagnosis"
+      ],
+      "validation_rules": [
+        "do not blame without evidence",
+        "separate hypothesis from confirmed failure reason"
+      ],
+      "promotion_targets": [
+        "failures",
+        "decisions",
+        "pending skills if reusable fix exists"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "allowed_tools": [
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "write failure memory",
+        "decide whether reusable fix exists"
+      ],
+      "execution_responsibilities": [
+        "structure failure log and diagnosis"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "writing_review",
+      "intent": "writing_review",
+      "trigger_phrases": [
+        "\\u6a21\\u62df\\u5ba1\\u7a3f\\u4eba\\u6279\\u8bc4",
+        "peer review",
+        "review my draft",
+        "\\u8bba\\u6587\\u5ba1\\u7a3f"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "result-narrative",
+        "peer-review-simulation"
+      ],
+      "required_inputs": [
+        "draft_or_result_summary"
+      ],
+      "expected_outputs": [
+        "narrative",
+        "critique"
+      ],
+      "validation_rules": [
+        "peer review output is criticism, not factual evidence",
+        "do not invent citations or journal rules"
+      ],
+      "promotion_targets": [
+        "reports",
+        "decisions",
+        "unresolved issues"
+      ],
+      "auto_crystallize_candidate": false,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "separate critique from evidence",
+        "store unresolved issues"
+      ],
+      "execution_responsibilities": [
+        "write narrative and critique"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "weekly_reporting",
+      "intent": "weekly_reporting",
+      "trigger_phrases": [
+        "\\u5468\\u62a5",
+        "weekly report",
+        "weekly digest",
+        "\\u9879\\u76ee\\u5468\\u62a5"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "weekly-research-report",
+        "weekly-research-digest"
+      ],
+      "required_inputs": [
+        "project_id"
+      ],
+      "expected_outputs": [
+        "report",
+        "digest"
+      ],
+      "validation_rules": [
+        "report only known project state",
+        "mark missing context"
+      ],
+      "promotion_targets": [
+        "reports",
+        "project memory",
+        "next actions"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "confirm memory updates",
+        "track next actions"
+      ],
+      "execution_responsibilities": [
+        "generate report and digest"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "entity_extraction",
+      "intent": "entity_extraction",
+      "trigger_phrases": [
+        "\\u63d0\\u53d6\\u5b9e\\u4f53",
+        "extract entities",
+        "\\u9776\\u70b9\\u6a21\\u578b\\u65b9\\u6cd5",
+        "\\u5b9e\\u4f53\\u62bd\\u53d6"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "extract-domain-entities",
+        "ingest-research-evidence"
+      ],
+      "required_inputs": [
+        "text"
+      ],
+      "expected_outputs": [
+        "entities",
+        "evidence_items"
+      ],
+      "validation_rules": [
+        "keep source_ids",
+        "do not promote unsourced mechanisms as facts"
+      ],
+      "promotion_targets": [
+        "graph",
+        "claims",
+        "project memory"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "allowed_tools": [
+        "file_reader"
+      ],
+      "brain_responsibilities": [
+        "promote to graph and low-risk memory"
+      ],
+      "execution_responsibilities": [
+        "extract entities and evidence"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "nature_citation_support",
+      "intent": "nature_citation_support",
+      "trigger_phrases": [
+        "Nature citation",
+        "CNS citation",
+        "supporting references",
+        "text citation",
+        "EndNote",
+        "RIS",
+        "Zotero",
+        "补引用",
+        "支撑文献"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "nature-citation"
+      ],
+      "required_inputs": [
+        "manuscript_text or claim_text"
+      ],
+      "expected_outputs": [
+        "citation_candidates",
+        "reference_export",
+        "evidence_notes"
+      ],
+      "validation_rules": [
+        "do not fabricate DOI or metadata",
+        "candidate papers must support the segment",
+        "keep export provenance"
+      ],
+      "promotion_targets": [
+        "references",
+        "reports",
+        "citation evidence"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "file_writer"
+      ],
+      "brain_responsibilities": [
+        "define citation scope",
+        "validate support strength",
+        "promote only verified references"
+      ],
+      "execution_responsibilities": [
+        "run nature-citation workflow",
+        "produce citation candidates and export notes"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "nature_figure_generation",
+      "intent": "nature_figure_generation",
+      "trigger_phrases": [
+        "Nature figure",
+        "publication figure",
+        "scientific figure",
+        "manuscript figure",
+        "publication plot",
+        "科研作图",
+        "论文图",
+        "高水平期刊图片"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "nature-figure"
+      ],
+      "required_inputs": [
+        "figure_goal",
+        "data_file",
+        "backend_choice"
+      ],
+      "expected_outputs": [
+        "figure_spec",
+        "figure_code",
+        "qa_report"
+      ],
+      "validation_rules": [
+        "ask Python or R before rendering",
+        "do not fabricate data",
+        "export editable vector output when possible"
+      ],
+      "promotion_targets": [
+        "figures",
+        "reports",
+        "datasets"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "file_writer",
+        "script_runner"
+      ],
+      "brain_responsibilities": [
+        "define figure claim",
+        "check evidence logic",
+        "validate figure risks"
+      ],
+      "execution_responsibilities": [
+        "run selected-backend figure workflow",
+        "write figure files and QA"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "nature_academic_polishing",
+      "intent": "nature_academic_polishing",
+      "trigger_phrases": [
+        "Nature style",
+        "academic polishing",
+        "polish manuscript",
+        "polish abstract",
+        "润色",
+        "论文润色",
+        "学术英语"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "nature-polishing"
+      ],
+      "required_inputs": [
+        "manuscript_text",
+        "section_type"
+      ],
+      "expected_outputs": [
+        "polished_text",
+        "revision_notes",
+        "risk_flags"
+      ],
+      "validation_rules": [
+        "preserve scientific meaning",
+        "do not invent data or citations",
+        "flag overclaims"
+      ],
+      "promotion_targets": [
+        "reports",
+        "manuscript drafts"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "identify section purpose",
+        "validate overclaim risks"
+      ],
+      "execution_responsibilities": [
+        "polish and return traceable revisions"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "nature_data_availability",
+      "intent": "nature_data_availability",
+      "trigger_phrases": [
+        "Data Availability",
+        "FAIR metadata",
+        "repository plan",
+        "data availability statement",
+        "数据可用性",
+        "数据共享",
+        "数据仓库"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "nature-data"
+      ],
+      "required_inputs": [
+        "dataset_inventory",
+        "journal_context"
+      ],
+      "expected_outputs": [
+        "data_availability_statement",
+        "repository_actions",
+        "fair_audit"
+      ],
+      "validation_rules": [
+        "do not invent accession numbers",
+        "map every dataset to access route",
+        "flag missing repository metadata"
+      ],
+      "promotion_targets": [
+        "datasets",
+        "reports",
+        "decisions"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "validate data-source coverage",
+        "downgrade incomplete statements"
+      ],
+      "execution_responsibilities": [
+        "draft statement and FAIR checklist"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "nature_reviewer_response",
+      "intent": "nature_reviewer_response",
+      "trigger_phrases": [
+        "response to reviewers",
+        "rebuttal letter",
+        "major revision",
+        "minor revision",
+        "reviewer comments",
+        "审稿意见回复",
+        "返修回复"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "nature-response"
+      ],
+      "required_inputs": [
+        "reviewer_comments",
+        "revision_notes"
+      ],
+      "expected_outputs": [
+        "response_letter",
+        "comment_triage",
+        "author_inputs_needed"
+      ],
+      "validation_rules": [
+        "do not invent manuscript changes",
+        "every reviewer comment must be addressed",
+        "flag author input needed"
+      ],
+      "promotion_targets": [
+        "reports",
+        "decisions",
+        "unresolved issues"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "verify traceability",
+        "separate commitments from missing inputs"
+      ],
+      "execution_responsibilities": [
+        "triage comments and draft responses"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    },
+    {
+      "pipeline_name": "nature_paper_to_ppt",
+      "intent": "nature_paper_to_ppt",
+      "trigger_phrases": [
+        "paper PPT",
+        "paper to slides",
+        "paper presentation",
+        "journal club",
+        "PPTX",
+        "文献汇报",
+        "组会PPT",
+        "论文PPT"
+      ],
+      "planner_agent": "brain_agent",
+      "executor_agent": "execution_agent",
+      "execution_skills": [
+        "nature-paper2ppt"
+      ],
+      "required_inputs": [
+        "paper_pdf or paper_text"
+      ],
+      "expected_outputs": [
+        "pptx",
+        "speaker_notes",
+        "qa_report"
+      ],
+      "validation_rules": [
+        "do not fabricate paper results",
+        "slides must follow the paper argument",
+        "record extraction limits"
+      ],
+      "promotion_targets": [
+        "reports",
+        "presentations"
+      ],
+      "auto_crystallize_candidate": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "allowed_tools": [
+        "file_reader",
+        "file_writer",
+        "report_writer"
+      ],
+      "brain_responsibilities": [
+        "define presentation goal",
+        "validate factual grounding"
+      ],
+      "execution_responsibilities": [
+        "build deck package and QA summary"
+      ],
+      "control_skills": {
+        "pre_dispatch": [
+          "skill-router-orchestrator",
+          "context-compiler-maintenance"
+        ],
+        "post_execution": [
+          "skill-output-validator",
+          "evidence-promotion"
+        ]
+      }
+    }
+  ]
+}

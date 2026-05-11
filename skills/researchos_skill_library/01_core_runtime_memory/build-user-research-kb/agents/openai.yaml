@@ -1,0 +1,4 @@
+interface:
+  display_name: "User Research KB"
+  short_description: "Build a personal research knowledge base"
+  default_prompt: "Build or update a layered personal research knowledge base from literature search runs, article abstract analyses, and downloaded-paper metadata."

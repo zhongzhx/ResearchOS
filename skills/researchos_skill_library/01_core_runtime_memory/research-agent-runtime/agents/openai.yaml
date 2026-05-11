@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Agent Runtime"
+  short_description: "Run the complete research agent"
+  default_prompt: "Run a complete research agent job from keyword search through article analysis, optional browser research learning, knowledge-base update, feedback capture, and KB question answering."

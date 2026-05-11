@@ -1,0 +1,38 @@
+.env
+.tmp/
+agent_data/
+data/
+generated_outputs/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local databases, logs, and generated runtime state
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+
+# Local research/download artifacts
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+
+# Generated/demo result artifacts
+browser-use/examples/apps/*/output/
+opendataloader-pdf/docs/hybrid/experiments/**/*.json
+
+# Build/runtime binaries generated locally
+runtime/
+
+# Nested repository metadata from vendored source snapshots
+**/.git/

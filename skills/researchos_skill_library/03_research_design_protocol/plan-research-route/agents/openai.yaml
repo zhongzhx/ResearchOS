@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Research Route"
+  short_description: "Design a graduate research route"
+  default_prompt: "Design a clear graduate research route from a topic direction, including research questions, literature path, method path, timeline, risks, and advisor-ready milestones."

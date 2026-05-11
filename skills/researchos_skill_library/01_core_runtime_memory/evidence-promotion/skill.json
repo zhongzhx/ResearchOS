@@ -1,0 +1,21 @@
+{
+  "name": "evidence-promotion",
+  "category": "01_core_runtime_memory",
+  "status": "active",
+  "planner_agent": "brain_agent",
+  "executor_agent": null,
+  "allowed_auto_call": true,
+  "requires_user_authorization": false,
+  "risk_level": "medium",
+  "input_types": [
+    "ExecutionResult",
+    "SkillRun",
+    "TaskSpec",
+    "artifacts"
+  ],
+  "output_types": [
+    "promotion_decision",
+    "Research Brain updates",
+    "Context Index updates"
+  ]
+}

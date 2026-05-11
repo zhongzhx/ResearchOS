@@ -1,0 +1,4 @@
+interface:
+  display_name: "Article Abstracts As Found"
+  short_description: "Analyze each paper abstract as it appears"
+  default_prompt: "For each newly found or downloaded article, summarize the abstract into background, methods, results, and conclusion, then write search-expansion terms."

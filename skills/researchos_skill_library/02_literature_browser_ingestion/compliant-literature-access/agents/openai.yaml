@@ -1,0 +1,3 @@
+display_name: Compliant Literature Access
+short_description: Legal scholarly access resolver
+default_prompt: Resolve legal access for these DOI records, download only allowed full text, and write an auditable access log.

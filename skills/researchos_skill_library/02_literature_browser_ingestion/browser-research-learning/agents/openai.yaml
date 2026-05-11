@@ -1,0 +1,4 @@
+interface:
+  display_name: "Browser Research Learning"
+  short_description: "Learn research topics through the browser"
+  default_prompt: "Use the user's authorized browser to search, open, read, and record research pages, then write browser learning notes into the user's knowledge base."

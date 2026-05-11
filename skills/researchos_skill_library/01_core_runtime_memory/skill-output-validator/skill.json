@@ -1,0 +1,23 @@
+{
+  "name": "skill-output-validator",
+  "category": "01_core_runtime_memory",
+  "status": "active",
+  "planner_agent": "brain_agent",
+  "executor_agent": null,
+  "allowed_auto_call": true,
+  "requires_user_authorization": false,
+  "risk_level": "medium",
+  "input_types": [
+    "ExecutionResult",
+    "SkillRun",
+    "TaskSpec",
+    "structured_outputs",
+    "logs"
+  ],
+  "output_types": [
+    "validation_report",
+    "safe_to_return",
+    "safe_to_promote",
+    "safe_to_crystallize"
+  ]
+}

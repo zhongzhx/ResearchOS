@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Agent Memory"
+  short_description: "Centralize task memory and compact context"
+  default_prompt: "Record each agent task into a central memory folder, compact large task records into context shards, and create new shards when one context file can no longer hold the compressed summary."

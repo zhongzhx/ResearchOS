@@ -1,0 +1,33 @@
+{
+  "email": "your.name@example.edu",
+  "run_name": "literature_access_run",
+  "access_modes": {
+    "open_access": true,
+    "crossref_tdm": true,
+    "campus_ip": true,
+    "ezproxy": {
+      "enabled": false,
+      "base_url": "https://ezproxy.example.edu/login?url=",
+      "login_url": "",
+      "service": "my-school-ezproxy",
+      "username_field": "user",
+      "password_field": "pass",
+      "extra_fields": {}
+    }
+  },
+  "request": {
+    "timeout_seconds": 45,
+    "delay_seconds": 0.5,
+    "user_agent": "CompliantLiteratureAccess/0.1 (mailto:your.name@example.edu)"
+  },
+  "download": {
+    "save_html": true,
+    "max_bytes": 104857600,
+    "stop_after_first_success": true
+  },
+  "publisher_headers": {
+    "api.elsevier.com": {
+      "X-ELS-APIKey": "env:ELSEVIER_API_KEY"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "skill-router-orchestrator",
+  "category": "01_core_runtime_memory",
+  "status": "active",
+  "planner_agent": "brain_agent",
+  "executor_agent": null,
+  "allowed_auto_call": true,
+  "requires_user_authorization": false,
+  "risk_level": "medium",
+  "input_types": [
+    "user_query",
+    "project_context_index",
+    "pipeline_registry",
+    "skill_catalog"
+  ],
+  "output_types": [
+    "selected_pipeline",
+    "TaskSpec",
+    "routing_explanation"
+  ]
+}

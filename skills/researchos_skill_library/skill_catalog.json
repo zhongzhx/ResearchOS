@@ -1,0 +1,1071 @@
+{
+  "version": "1.0",
+  "skills": [
+    {
+      "skill_id": "research-agent-runtime",
+      "display_name": "Research Agent Runtime",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/research-agent-runtime/SKILL.md",
+      "legacy_paths": [
+        "research-agent-runtime/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "task"
+      ],
+      "output_types": [
+        "runtime_result"
+      ],
+      "promotion_targets": [
+        "execution_memory",
+        "project_memory"
+      ],
+      "notes": "Core runtime wrapper; must not leak secrets into logs."
+    },
+    {
+      "skill_id": "manage-agent-memory",
+      "display_name": "Manage Agent Memory",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/manage-agent-memory/SKILL.md",
+      "legacy_paths": [
+        "manage-agent-memory/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "memory_payload"
+      ],
+      "output_types": [
+        "memory_update"
+      ],
+      "promotion_targets": [
+        "project_memory"
+      ],
+      "notes": "Brain Agent remains responsible for long-term Research Brain writes."
+    },
+    {
+      "skill_id": "ingest-research-evidence",
+      "display_name": "Ingest Research Evidence",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/ingest-research-evidence/SKILL.md",
+      "legacy_paths": [
+        "ingest-research-evidence/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "pdf",
+        "text",
+        "reference"
+      ],
+      "output_types": [
+        "evidence_items",
+        "chunks"
+      ],
+      "promotion_targets": [
+        "papers",
+        "claims",
+        "project_memory"
+      ],
+      "notes": "Evidence must retain provenance."
+    },
+    {
+      "skill_id": "build-user-research-kb",
+      "display_name": "Build User Research KB",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/build-user-research-kb/SKILL.md",
+      "legacy_paths": [
+        "build-user-research-kb/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "pdf",
+        "reference",
+        "chunk"
+      ],
+      "output_types": [
+        "kb_entry",
+        "chunks"
+      ],
+      "promotion_targets": [
+        "papers",
+        "context_index"
+      ],
+      "notes": "Writes local KB/RAG assets."
+    },
+    {
+      "skill_id": "keyword-research-harvest",
+      "display_name": "Keyword Research Harvest",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/keyword-research-harvest/SKILL.md",
+      "legacy_paths": [
+        "keyword-research-harvest/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": true,
+      "risk_level": "high",
+      "input_types": [
+        "keywords"
+      ],
+      "output_types": [
+        "paper_table",
+        "downloaded_pdfs",
+        "ingestion_status"
+      ],
+      "promotion_targets": [
+        "papers",
+        "claims",
+        "project_memory",
+        "context_index"
+      ],
+      "notes": "Large literature harvest requires user approval."
+    },
+    {
+      "skill_id": "compliant-literature-access",
+      "display_name": "Compliant Literature Access",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/compliant-literature-access/SKILL.md",
+      "legacy_paths": [
+        "compliant-literature-access/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "doi",
+        "url",
+        "keywords"
+      ],
+      "output_types": [
+        "access_status",
+        "downloaded_pdfs"
+      ],
+      "promotion_targets": [
+        "papers"
+      ],
+      "notes": "Must preserve compliant access guardrails."
+    },
+    {
+      "skill_id": "extract-first-article-keywords",
+      "display_name": "Extract First Article Keywords",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/extract-first-article-keywords/SKILL.md",
+      "legacy_paths": [
+        "extract-first-article-keywords/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "input_types": [
+        "paper_text",
+        "metadata"
+      ],
+      "output_types": [
+        "keywords",
+        "entities"
+      ],
+      "promotion_targets": [
+        "papers",
+        "graph"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "browser-research-learning",
+      "display_name": "Browser Research Learning",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/browser-research-learning/SKILL.md",
+      "legacy_paths": [
+        "browser-research-learning/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": true,
+      "risk_level": "high",
+      "input_types": [
+        "url",
+        "browser_session"
+      ],
+      "output_types": [
+        "browser_learning_evidence"
+      ],
+      "promotion_targets": [
+        "browser_learning evidence",
+        "project memory",
+        "low-confidence notes"
+      ],
+      "notes": "No CAPTCHA, MFA, SSO, paywall, or anti-bot bypass. Browser output is not peer-reviewed evidence."
+    },
+    {
+      "skill_id": "browser-use",
+      "display_name": "Browser Use",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/browser-use/SKILL.md",
+      "legacy_paths": [
+        "browser-use/skills/browser-use/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": true,
+      "risk_level": "high",
+      "input_types": [
+        "url",
+        "browser_task"
+      ],
+      "output_types": [
+        "browser_session_result",
+        "screenshot",
+        "extracted_data"
+      ],
+      "promotion_targets": [
+        "browser_learning evidence",
+        "project memory"
+      ],
+      "notes": "Moved from browser-use/skills; use only for authorized browser automation and data extraction."
+    },
+    {
+      "skill_id": "cloud",
+      "display_name": "Browser Use Cloud",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/cloud/SKILL.md",
+      "legacy_paths": [
+        "browser-use/skills/cloud/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "input_types": [
+        "browser_use_cloud_question",
+        "implementation_context"
+      ],
+      "output_types": [
+        "reference_guidance"
+      ],
+      "promotion_targets": [],
+      "notes": "Moved from browser-use/skills; documentation reference for Browser Use Cloud APIs and SDKs."
+    },
+    {
+      "skill_id": "open-source",
+      "display_name": "Browser Use Open Source",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/open-source/SKILL.md",
+      "legacy_paths": [
+        "browser-use/skills/open-source/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "input_types": [
+        "browser_use_python_question",
+        "implementation_context"
+      ],
+      "output_types": [
+        "reference_guidance"
+      ],
+      "promotion_targets": [],
+      "notes": "Moved from browser-use/skills; documentation reference for the open-source browser-use Python library."
+    },
+    {
+      "skill_id": "remote-browser",
+      "display_name": "Remote Browser",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/remote-browser/SKILL.md",
+      "legacy_paths": [
+        "browser-use/skills/remote-browser/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": true,
+      "risk_level": "high",
+      "input_types": [
+        "url",
+        "remote_browser_task"
+      ],
+      "output_types": [
+        "browser_session_result",
+        "screenshot",
+        "extracted_data"
+      ],
+      "promotion_targets": [
+        "browser_learning evidence",
+        "project memory"
+      ],
+      "notes": "Moved from browser-use/skills; use only for authorized remote browser automation."
+    },
+    {
+      "skill_id": "plan-research-route",
+      "display_name": "Plan Research Route",
+      "category": "03_research_design_protocol",
+      "canonical_path": "skills/researchos_skill_library/03_research_design_protocol/plan-research-route/SKILL.md",
+      "legacy_paths": [
+        "plan-research-route/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "project_context"
+      ],
+      "output_types": [
+        "research_plan"
+      ],
+      "promotion_targets": [
+        "project_memory",
+        "decisions",
+        "workflows"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "extract-domain-entities",
+      "display_name": "Extract Domain Entities",
+      "category": "03_research_design_protocol",
+      "canonical_path": "skills/researchos_skill_library/03_research_design_protocol/extract-domain-entities/SKILL.md",
+      "legacy_paths": [
+        "extract-domain-entities/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "input_types": [
+        "text"
+      ],
+      "output_types": [
+        "entities"
+      ],
+      "promotion_targets": [
+        "graph",
+        "claims",
+        "project_memory"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "protocol-extraction",
+      "display_name": "Protocol Extraction",
+      "category": "03_research_design_protocol",
+      "canonical_path": "skills/researchos_skill_library/03_research_design_protocol/protocol-extraction/SKILL.md",
+      "legacy_paths": [
+        "protocol-extraction/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "paper_or_method_text"
+      ],
+      "output_types": [
+        "protocol"
+      ],
+      "promotion_targets": [
+        "protocols",
+        "experiments",
+        "decisions"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "sop-generation",
+      "display_name": "SOP Generation",
+      "category": "03_research_design_protocol",
+      "canonical_path": "skills/researchos_skill_library/03_research_design_protocol/sop-generation/SKILL.md",
+      "legacy_paths": [
+        "sop-generation/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "method",
+        "protocol"
+      ],
+      "output_types": [
+        "sop"
+      ],
+      "promotion_targets": [
+        "protocols",
+        "experiments",
+        "decisions"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "design-experiment-matrix",
+      "display_name": "Design Experiment Matrix",
+      "category": "03_research_design_protocol",
+      "canonical_path": "skills/researchos_skill_library/03_research_design_protocol/design-experiment-matrix/SKILL.md",
+      "legacy_paths": [
+        "design-experiment-matrix/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "objective",
+        "constraints"
+      ],
+      "output_types": [
+        "experiment_matrix"
+      ],
+      "promotion_targets": [
+        "experiments",
+        "protocols",
+        "decisions"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "parse-scientific-data",
+      "display_name": "Parse Scientific Data",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/parse-scientific-data/SKILL.md",
+      "legacy_paths": [
+        "parse-scientific-data/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "csv",
+        "xlsx",
+        "data_file"
+      ],
+      "output_types": [
+        "structured_data"
+      ],
+      "promotion_targets": [
+        "datasets",
+        "claims",
+        "decisions",
+        "reports"
+      ],
+      "notes": "Missing replicate values should downgrade confidence."
+    },
+    {
+      "skill_id": "analyze-experiment-results",
+      "display_name": "Analyze Experiment Results",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/analyze-experiment-results/SKILL.md",
+      "legacy_paths": [
+        "analyze-experiment-results/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "structured_data"
+      ],
+      "output_types": [
+        "analysis_result"
+      ],
+      "promotion_targets": [
+        "datasets",
+        "claims",
+        "decisions",
+        "reports"
+      ],
+      "notes": "Do not claim significance without statistical evidence."
+    },
+    {
+      "skill_id": "result-narrative",
+      "display_name": "Result Narrative",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/result-narrative/SKILL.md",
+      "legacy_paths": [
+        "result-narrative/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "result_summary"
+      ],
+      "output_types": [
+        "narrative"
+      ],
+      "promotion_targets": [
+        "reports",
+        "claims"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "peer-review-simulation",
+      "display_name": "Peer Review Simulation",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/peer-review-simulation/SKILL.md",
+      "legacy_paths": [
+        "peer-review-simulation/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "draft"
+      ],
+      "output_types": [
+        "critique"
+      ],
+      "promotion_targets": [
+        "reports",
+        "decisions",
+        "unresolved issues"
+      ],
+      "notes": "Criticism is not factual evidence and must not be promoted as claim support."
+    },
+    {
+      "skill_id": "diagnose-research-bottleneck",
+      "display_name": "Diagnose Research Bottleneck",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/diagnose-research-bottleneck/SKILL.md",
+      "legacy_paths": [
+        "diagnose-research-bottleneck/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "failure_description",
+        "project_context"
+      ],
+      "output_types": [
+        "diagnosis"
+      ],
+      "promotion_targets": [
+        "failures",
+        "decisions",
+        "pending skills"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "failure-log",
+      "display_name": "Failure Log",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/failure-log/SKILL.md",
+      "legacy_paths": [
+        "failure-log/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "low",
+      "input_types": [
+        "failure_description"
+      ],
+      "output_types": [
+        "failure_memory"
+      ],
+      "promotion_targets": [
+        "failures",
+        "decisions"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "weekly-research-report",
+      "display_name": "Weekly Research Report",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/weekly-research-report/SKILL.md",
+      "legacy_paths": [
+        "weekly-research-report/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "project_id"
+      ],
+      "output_types": [
+        "report"
+      ],
+      "promotion_targets": [
+        "reports",
+        "project_memory",
+        "next_actions"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "weekly-research-digest",
+      "display_name": "Weekly Research Digest",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/weekly-research-digest/SKILL.md",
+      "legacy_paths": [
+        "weekly-research-digest/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "project_id"
+      ],
+      "output_types": [
+        "digest"
+      ],
+      "promotion_targets": [
+        "reports",
+        "project_memory",
+        "next_actions"
+      ],
+      "notes": ""
+    },
+    {
+      "skill_id": "generated-skill-template",
+      "display_name": "Generated Skill Template",
+      "category": "generated",
+      "canonical_path": "skills/generated/{skill_name}/SKILL.md",
+      "legacy_paths": [],
+      "status": "pending_review",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": false,
+      "requires_user_authorization": true,
+      "risk_level": "medium",
+      "input_types": [],
+      "output_types": [],
+      "promotion_targets": [],
+      "notes": "Generated skills are never auto-called until explicitly activated."
+    },
+    {
+      "skill_id": "skill-router-orchestrator",
+      "display_name": "Skill Router Orchestrator",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/skill-router-orchestrator/SKILL.md",
+      "legacy_paths": [],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": null
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "user_query",
+        "project_context_index",
+        "pipeline_registry",
+        "skill_catalog"
+      ],
+      "output_types": [
+        "selected_pipeline",
+        "TaskSpec",
+        "routing_explanation"
+      ],
+      "promotion_targets": [],
+      "notes": "Internal Brain Agent control skill; not executed as an ordinary research script."
+    },
+    {
+      "skill_id": "evidence-promotion",
+      "display_name": "Evidence Promotion",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/evidence-promotion/SKILL.md",
+      "legacy_paths": [],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": null
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "ExecutionResult",
+        "SkillRun",
+        "TaskSpec",
+        "artifacts"
+      ],
+      "output_types": [
+        "promotion_decision",
+        "Research Brain updates",
+        "Context Index updates"
+      ],
+      "promotion_targets": [],
+      "notes": "Internal Brain Agent control skill; not executed as an ordinary research script."
+    },
+    {
+      "skill_id": "context-compiler-maintenance",
+      "display_name": "Context Compiler Maintenance",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/context-compiler-maintenance/SKILL.md",
+      "legacy_paths": [],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": null
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "project_context_index",
+        "Research Brain Repo",
+        "user_query",
+        "intent"
+      ],
+      "output_types": [
+        "brain_context_envelope",
+        "execution_context_package",
+        "context_hash"
+      ],
+      "promotion_targets": [],
+      "notes": "Internal Brain Agent control skill; not executed as an ordinary research script."
+    },
+    {
+      "skill_id": "skill-output-validator",
+      "display_name": "Skill Output Validator",
+      "category": "01_core_runtime_memory",
+      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/skill-output-validator/SKILL.md",
+      "legacy_paths": [],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": null
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "ExecutionResult",
+        "SkillRun",
+        "TaskSpec",
+        "structured_outputs",
+        "logs"
+      ],
+      "output_types": [
+        "validation_report",
+        "safe_to_return",
+        "safe_to_promote",
+        "safe_to_crystallize"
+      ],
+      "promotion_targets": [],
+      "notes": "Internal Brain Agent control skill; not executed as an ordinary research script."
+    },
+    {
+      "skill_id": "nature-citation",
+      "display_name": "Nature Citation",
+      "category": "02_literature_browser_ingestion",
+      "canonical_path": "skills/researchos_skill_library/02_literature_browser_ingestion/nature-citation/SKILL.md",
+      "legacy_paths": [
+        "nature-citation/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "manuscript_text",
+        "claim_text",
+        "citation_scope"
+      ],
+      "output_types": [
+        "citation_candidates",
+        "reference_export",
+        "evidence_notes"
+      ],
+      "promotion_targets": [
+        "references",
+        "reports",
+        "citation evidence"
+      ],
+      "notes": "Nature/CNS-family citation retrieval and export; do not fabricate bibliographic metadata."
+    },
+    {
+      "skill_id": "nature-figure",
+      "display_name": "Nature Figure",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/nature-figure/SKILL.md",
+      "legacy_paths": [
+        "nature-figure/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "data_file",
+        "figure_goal",
+        "backend_choice"
+      ],
+      "output_types": [
+        "figure_spec",
+        "figure_code",
+        "svg_png_outputs",
+        "qa_report"
+      ],
+      "promotion_targets": [
+        "figures",
+        "reports",
+        "datasets"
+      ],
+      "notes": "Requires an explicit Python or R backend before rendering publication figures."
+    },
+    {
+      "skill_id": "nature-paper2ppt",
+      "display_name": "Nature Paper to PPT",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/nature-paper2ppt/SKILL.md",
+      "legacy_paths": [
+        "nature-paper2ppt/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "paper_pdf",
+        "paper_text",
+        "reading_notes"
+      ],
+      "output_types": [
+        "pptx",
+        "speaker_notes",
+        "qa_report"
+      ],
+      "promotion_targets": [
+        "reports",
+        "presentations"
+      ],
+      "notes": "Builds Chinese PPTX decks from scientific papers; do not fabricate paper results."
+    },
+    {
+      "skill_id": "nature-polishing",
+      "display_name": "Nature Polishing",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/nature-polishing/SKILL.md",
+      "legacy_paths": [
+        "nature-polishing/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "manuscript_text",
+        "section_type",
+        "target_journal"
+      ],
+      "output_types": [
+        "polished_text",
+        "risk_flags",
+        "revision_notes"
+      ],
+      "promotion_targets": [
+        "reports",
+        "manuscript drafts"
+      ],
+      "notes": "Academic prose polishing; must preserve scientific meaning and avoid invented claims."
+    },
+    {
+      "skill_id": "nature-response",
+      "display_name": "Nature Reviewer Response",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/nature-response/SKILL.md",
+      "legacy_paths": [
+        "nature-response/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "reviewer_comments",
+        "decision_letter",
+        "revision_notes"
+      ],
+      "output_types": [
+        "response_letter",
+        "comment_triage",
+        "author_inputs_needed"
+      ],
+      "promotion_targets": [
+        "reports",
+        "decisions",
+        "unresolved issues"
+      ],
+      "notes": "Reviewer response drafting; criticism/action mapping is not factual evidence by itself."
+    },
+    {
+      "skill_id": "nature-data",
+      "display_name": "Nature Data Availability",
+      "category": "04_data_analysis_writing_review",
+      "canonical_path": "skills/researchos_skill_library/04_data_analysis_writing_review/nature-data/SKILL.md",
+      "legacy_paths": [
+        "nature-data/SKILL.md"
+      ],
+      "status": "active",
+      "owner": {
+        "planner": "brain_agent",
+        "executor": "execution_agent"
+      },
+      "allowed_auto_call": true,
+      "requires_user_authorization": false,
+      "risk_level": "medium",
+      "input_types": [
+        "dataset_inventory",
+        "manuscript_notes",
+        "repository_plan"
+      ],
+      "output_types": [
+        "data_availability_statement",
+        "fair_audit",
+        "repository_actions"
+      ],
+      "promotion_targets": [
+        "datasets",
+        "reports",
+        "decisions"
+      ],
+      "notes": "Nature data availability and FAIR metadata; do not invent accession numbers or repository identifiers."
+    }
+  ]
+}

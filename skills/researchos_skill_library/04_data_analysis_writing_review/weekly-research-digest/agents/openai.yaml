@@ -1,0 +1,4 @@
+interface:
+  display_name: "System.Collections.Hashtable.display"
+  short_description: "System.Collections.Hashtable.short"
+  default_prompt: "System.Collections.Hashtable.prompt"
