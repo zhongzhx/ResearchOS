@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AURA Research</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <button class="brand" data-route="home" aria-label="AURA 首页">
+          <span class="brand-mark">A</span>
+          <span>
+            <strong>AURA</strong>
+            <small>Research OS</small>
+          </span>
+        </button>
+        <nav class="nav-list">
+          <button class="nav-item is-active" data-route="home">对话</button>
+          <button class="nav-item" data-route="tasks">任务流</button>
+          <button class="nav-item" data-route="library">资料库</button>
+          <button class="nav-item" data-route="memory">项目记忆</button>
+          <button class="nav-item" data-route="settings">状态</button>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">连接中</span>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="view view-home is-active" data-view="home">
+          <div class="home-composer" data-home-chat>
+            <p class="eyebrow">AURA Research</p>
+            <h1>从一个科研问题开始</h1>
+            <div class="chat-log" id="chatLog"></div>
+            <textarea id="homePrompt" placeholder="输入文献方向、实验设计、数据分析需求，或直接问项目进展"></textarea>
+            <div class="composer-actions">
+              <span id="projectHint">当前项目读取中</span>
+              <button class="primary-action" id="sendHome">发送</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view="tasks">
+          <header class="page-head">
+            <p class="eyebrow">Task Flow</p>
+            <h2>任务流</h2>
+            <button class="ghost-action" id="refreshTasks">刷新</button>
+          </header>
+          <div class="soft-panel">
+            <div class="list" id="taskList"></div>
+          </div>
+        </section>
+
+        <section class="view" data-view="library">
+          <header class="page-head">
+            <p class="eyebrow">Library</p>
+            <h2>资料库</h2>
+            <button class="ghost-action" id="refreshLibrary">刷新</button>
+          </header>
+          <div class="soft-panel">
+            <div class="list" id="libraryList"></div>
+          </div>
+        </section>
+
+        <section class="view" data-view="memory">
+          <header class="page-head">
+            <p class="eyebrow">Memory</p>
+            <h2>项目记忆</h2>
+            <button class="ghost-action" id="refreshMemory">整理</button>
+          </header>
+          <div class="soft-panel">
+            <pre id="memoryText">选择项目后，这里会展示项目上下文。</pre>
+          </div>
+        </section>
+
+        <section class="view" data-view="settings">
+          <header class="page-head">
+            <p class="eyebrow">Local Status</p>
+            <h2>状态</h2>
+            <button class="ghost-action" id="refreshStatus">重新检测</button>
+          </header>
+          <div class="soft-panel status-grid" id="statusGrid"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

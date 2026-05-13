@@ -47,7 +47,22 @@ class LocalClientBootTests(unittest.TestCase):
 
         self.assertEqual(client_module.WorkbenchTheme.CANVAS, "#010102")
         self.assertEqual(client_module.WorkbenchTheme.ACCENT, "#5e6ad2")
-        self.assertEqual(client_module.WorkbenchTheme.PANEL_RADIUS_NOTE, "8-12px")
+        self.assertEqual(client_module.WorkbenchTheme.PANEL_RADIUS_NOTE, "soft-16-24px")
+
+    def test_overview_source_keeps_home_as_conversation_only(self) -> None:
+        source = CLIENT_PATH.read_text(encoding="utf-8")
+        overview_source = source.split("    def _build_overview", 1)[1].split("    def render_overview_task_rows", 1)[0]
+
+        self.assertIn("home_command_entry", overview_source)
+        self.assertNotIn("overview_task_rows", overview_source)
+        self.assertNotIn("overview_resource_rows", overview_source)
+
+    def test_sidebar_source_does_not_bind_hover_expansion(self) -> None:
+        source = CLIENT_PATH.read_text(encoding="utf-8")
+        sidebar_source = source.split("    def _build_sidebar", 1)[1].split("    def render_sidebar_nav", 1)[0]
+
+        self.assertNotIn('bind("<Enter>", self.expand_sidebar)', sidebar_source)
+        self.assertNotIn('bind("<Leave>", self.collapse_sidebar)', sidebar_source)
 
     def test_primary_workspace_keys_are_low_density_user_workflows(self) -> None:
         client_module = load_client_module()

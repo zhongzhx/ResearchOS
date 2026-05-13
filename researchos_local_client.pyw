@@ -51,7 +51,7 @@ class WorkbenchTheme:
     SUCCESS = "#27a644"
     WARNING = "#ffc533"
     DANGER = "#ff6161"
-    PANEL_RADIUS_NOTE = "8-12px"
+    PANEL_RADIUS_NOTE = "soft-16-24px"
 
 
 PRIMARY_WORKSPACES = [
@@ -443,8 +443,6 @@ class ResearchOSClientApp:
 
         brand = tk.Frame(self.sidebar, bg=BG_DEEP, cursor="hand2")
         brand.grid(row=0, column=0, sticky="ew", padx=14, pady=(22, 24))
-        brand.bind("<Enter>", self.expand_sidebar)
-        brand.bind("<Leave>", self.collapse_sidebar)
         brand.bind("<Button-1>", lambda _event: self.show_view("overview"))
         self.status_dot = tk.Canvas(brand, width=0, height=0, bg=BG_DEEP, highlightthickness=0)
         self.status_dot_id = self.status_dot.create_oval(0, 0, 0, 0, fill=WARN, outline=WARN)
@@ -467,18 +465,12 @@ class ResearchOSClientApp:
 
         self.dock = tk.Frame(self.sidebar, bg=BG_DEEP)
         self.dock.grid(row=1, column=0, sticky="nsew", padx=14)
-        self.dock.bind("<Enter>", self.expand_sidebar)
-        self.dock.bind("<Leave>", self.collapse_sidebar)
         self.render_sidebar_nav()
 
         bottom = tk.Frame(self.sidebar, bg=BG_DEEP)
         bottom.grid(row=2, column=0, sticky="ew", padx=14, pady=(10, 20))
-        bottom.bind("<Enter>", self.expand_sidebar)
-        bottom.bind("<Leave>", self.collapse_sidebar)
         mini = tk.Frame(bottom, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, cursor="hand2")
         mini.pack(fill="x", ipady=10)
-        mini.bind("<Enter>", self.expand_sidebar)
-        mini.bind("<Leave>", self.collapse_sidebar)
         mini.bind("<Button-1>", lambda _event: self.show_view("workspace_user"))
         self.mini_project_dot = tk.Label(mini, text="●", bg=BG_SURFACE, fg=ACCENT, font=("Microsoft YaHei UI", 13, "bold"), cursor="hand2")
         self.mini_project_dot.pack(side="left", padx=(12, 9))
@@ -540,8 +532,6 @@ class ResearchOSClientApp:
         button.pack(fill="x", pady=4)
         button._aura_icon = icon
         button._aura_title = title
-        button.bind("<Enter>", self.expand_sidebar)
-        button.bind("<Leave>", self.collapse_sidebar)
         self.nav_buttons[key] = button
 
     def _sync_sidebar_labels(self) -> None:
@@ -562,8 +552,7 @@ class ResearchOSClientApp:
             button.configure(text=f"{icon}  {title}" if expanded else icon)
 
     def animate_sidebar_width(self, target: int) -> None:
-        if getattr(self, "sidebar_target_width", None) == target and int(self.sidebar.cget("width")) == target:
-            return
+        return
         self.sidebar_target_width = target
         if self.sidebar_animation_after:
             try:
@@ -587,34 +576,16 @@ class ResearchOSClientApp:
             self._sync_sidebar_labels()
 
     def expand_sidebar(self, _event=None) -> None:
-        if self.dock_expanded and int(self.sidebar.cget("width")) >= 260:
-            return
         self.dock_expanded = True
         self._sync_sidebar_labels()
         if hasattr(self, "sidebar"):
-            self.animate_sidebar_width(260)
+            self.sidebar.configure(width=230)
 
     def collapse_sidebar(self, _event=None) -> None:
-        if self.root.winfo_width() >= 760:
-            self.dock_expanded = True
-            self._sync_sidebar_labels()
-            if hasattr(self, "sidebar"):
-                self.sidebar.configure(width=230)
-            return
-        x = self.root.winfo_pointerx()
-        y = self.root.winfo_pointery()
-        target = self.root.winfo_containing(x, y)
-        widget = target
-        while widget is not None:
-            if widget is self.sidebar:
-                return
-            widget = getattr(widget, "master", None)
-        if not self.dock_expanded and int(self.sidebar.cget("width")) <= 88:
-            return
-        self.dock_expanded = False
+        self.dock_expanded = True
         self._sync_sidebar_labels()
         if hasattr(self, "sidebar"):
-            self.animate_sidebar_width(88)
+            self.sidebar.configure(width=230)
 
     def show_dock(self, _event=None) -> None:
         if self.dock_hide_after:
@@ -870,54 +841,56 @@ class ResearchOSClientApp:
             self.render_projects(cached_projects, from_cache=True)
 
     def _build_overview(self) -> None:
-        view = self._view("overview", "总览", "项目状态、任务流和资料库概览。")
+        view = self._view("overview", "AURA", "从一个问题开始。")
         view.grid_columnconfigure(0, weight=1)
-        view.grid_rowconfigure(1, weight=1)
+        view.grid_rowconfigure(0, weight=1)
 
-        summary = self._workbench_section(view, "当前项目", "ResearchOS 会围绕当前项目读取资料库、任务和记忆。")
-        summary.grid(row=0, column=0, sticky="ew", padx=26, pady=(22, 14))
-        self.home_project_summary = tk.Label(summary, text="等待连接本地工作区", bg=BG_SURFACE, fg=TEXT_1, anchor="w", justify="left", font=(FONT_UI, 11))
-        self.home_project_summary.pack(fill="x")
-        self.home_status_line = tk.Label(summary, text="本地服务检测中", bg=BG_SURFACE, fg=TEXT_3, anchor="w", font=(FONT_UI, 9))
-        self.home_status_line.pack(fill="x", pady=(6, 0))
+        center = tk.Frame(view, bg=BG_BASE)
+        center.grid(row=0, column=0, sticky="nsew", padx=34, pady=34)
+        center.grid_columnconfigure(0, weight=1)
+        center.grid_rowconfigure(0, weight=1)
+        center.grid_rowconfigure(2, weight=1)
 
-        body = ttk.Frame(view, style="Workspace.TFrame")
-        body.grid(row=1, column=0, sticky="nsew", padx=26, pady=(0, 22))
-        body.grid_columnconfigure(0, weight=3)
-        body.grid_columnconfigure(1, weight=2)
-        body.grid_rowconfigure(0, weight=1)
+        composer = tk.Frame(center, bg=BG_SURFACE, padx=24, pady=24)
+        composer.grid(row=1, column=0, sticky="ew")
+        composer.grid_columnconfigure(0, weight=1)
+        tk.Label(composer, text="AURA Research", bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 18, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 14))
+        self.home_command_entry = self._reading_text(composer, 7)
+        self.home_command_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 14))
+        self.home_command_entry.insert("1.0", "输入科研问题、文献方向、实验设计或数据分析需求")
+        self.home_command_entry.configure(fg=TEXT_3)
+        self.home_command_entry.bind("<FocusIn>", self.clear_home_command_placeholder)
+        self.home_command_entry.bind("<FocusOut>", self.restore_home_command_placeholder)
+        self.home_command_entry.bind("<Control-Return>", lambda _event: self.send_home_command())
+        ttk.Button(composer, text="发送", style="Accent.TButton", command=self.send_home_command).grid(row=2, column=1, sticky="e")
 
-        tasks = self._workbench_section(body, "任务流", "运行中、待确认、失败和最近完成的任务。")
-        tasks.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        self.overview_task_rows = tk.Frame(tasks, bg=BG_SURFACE)
-        self.overview_task_rows.pack(fill="both", expand=True)
-        self._action_bar(tasks, [
-            ("刷新任务", self.load_user_tasks_summary, "primary"),
-            ("自动推进", self.run_agent_heartbeat, "secondary"),
-            ("扫描项目", self.run_research_watcher, "secondary"),
-        ]).pack(fill="x", pady=(12, 0))
-
-        side = ttk.Frame(body, style="Workspace.TFrame")
-        side.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-        side.grid_columnconfigure(0, weight=1)
-        side.grid_rowconfigure(2, weight=1)
-
-        resources = self._workbench_section(side, "资料库", "文献、PDF、知识库、数据和实验对象。")
-        resources.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        self.overview_resource_rows = tk.Frame(resources, bg=BG_SURFACE)
-        self.overview_resource_rows.pack(fill="x")
-
-        next_actions = self._workbench_section(side, "下一步", "少量关键动作，而不是铺满快捷卡片。")
-        next_actions.grid(row=1, column=0, sticky="ew")
-        self._action_bar(next_actions, [
-            ("问 AURA", lambda: self.show_view("agent"), "primary"),
-            ("采集文献", lambda: self.show_view("library_user"), "secondary"),
-            ("打开任务流", lambda: self.show_view("tasks_user"), "secondary"),
-        ]).pack(fill="x")
-
+        self.home_project_summary = tk.Label(view, text="", bg=BG_BASE, fg=BG_BASE, font=(FONT_UI, 1))
+        self.home_status_line = tk.Label(view, text="", bg=BG_BASE, fg=BG_BASE, font=(FONT_UI, 1))
         self.aura_toast = tk.Label(view, text="", bg=BG_SURFACE, fg=WorkbenchTheme.ACCENT_HOVER, padx=16, pady=12, font=(FONT_UI, 9, "bold"), highlightbackground=BORDER, highlightthickness=1)
-        self.render_overview_task_rows()
-        self.render_overview_resource_rows()
+
+    def clear_home_command_placeholder(self, _event=None) -> None:
+        if not hasattr(self, "home_command_entry"):
+            return
+        if self.home_command_entry.get("1.0", "end-1c") == "输入科研问题、文献方向、实验设计或数据分析需求":
+            self.home_command_entry.delete("1.0", tk.END)
+            self.home_command_entry.configure(fg=TEXT_1)
+
+    def restore_home_command_placeholder(self, _event=None) -> None:
+        if not hasattr(self, "home_command_entry"):
+            return
+        if not self.home_command_entry.get("1.0", "end-1c").strip():
+            self.home_command_entry.insert("1.0", "输入科研问题、文献方向、实验设计或数据分析需求")
+            self.home_command_entry.configure(fg=TEXT_3)
+
+    def send_home_command(self) -> str:
+        value = clean(self.home_command_entry.get("1.0", "end-1c") if hasattr(self, "home_command_entry") else "")
+        if not value or value == "输入科研问题、文献方向、实验设计或数据分析需求":
+            self.show_aura_toast("先输入一个科研问题")
+            return "break"
+        self.home_command_entry.delete("1.0", tk.END)
+        self.restore_home_command_placeholder()
+        self.open_chat_with_message(value)
+        return "break"
 
     def render_overview_task_rows(self) -> None:
         if not hasattr(self, "overview_task_rows"):
