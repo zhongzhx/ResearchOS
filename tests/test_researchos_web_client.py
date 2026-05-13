@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 
@@ -6,6 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB_CLIENT = ROOT / "web_client"
 WEB_SERVER = ROOT / "researchos_web_client.py"
+PACKAGE_JSON = ROOT / "package.json"
+ELECTRON_MAIN = ROOT / "electron" / "main.js"
 
 
 def load_web_module():
@@ -44,6 +47,24 @@ class ResearchOSWebClientTests(unittest.TestCase):
         self.assertEqual(module.WEB_ROOT, WEB_CLIENT)
         self.assertTrue(hasattr(module.WebClientHandler, "proxy_backend"))
         self.assertIn("/api/backend", WEB_SERVER.read_text(encoding="utf-8"))
+
+    def test_electron_package_declares_desktop_client_entry(self) -> None:
+        package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+
+        self.assertEqual(package["main"], "electron/main.js")
+        self.assertEqual(package["scripts"]["client:electron"], "electron .")
+        self.assertEqual(package["scripts"]["client:electron:smoke"], "electron . --smoke-test")
+        self.assertIn("electron", package["devDependencies"])
+
+    def test_electron_main_loads_html_client_without_tk_shell(self) -> None:
+        source = ELECTRON_MAIN.read_text(encoding="utf-8")
+
+        self.assertIn("BrowserWindow", source)
+        self.assertIn("web_client", source)
+        self.assertIn("api/backend", source)
+        self.assertIn("nodeIntegration: false", source)
+        self.assertIn("--smoke-test", source)
+        self.assertNotIn("tkinter", source.lower())
 
 
 if __name__ == "__main__":

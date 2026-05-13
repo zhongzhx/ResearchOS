@@ -1,0 +1,15 @@
+{
+  "name": "aura-research-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local desktop HTML client for AURA Research.",
+  "main": "electron/main.js",
+  "scripts": {
+    "client:electron": "electron .",
+    "client:electron:smoke": "electron . --smoke-test",
+    "client:web": "py researchos_web_client.py --host 127.0.0.1 --port 58259 --open"
+  },
+  "devDependencies": {
+    "electron": "^39.8.10"
+  }
+}
