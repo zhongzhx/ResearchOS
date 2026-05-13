@@ -868,221 +868,80 @@ class ResearchOSClientApp:
             self.render_projects(cached_projects, from_cache=True)
 
     def _build_overview(self) -> None:
-        view = self._view("overview", "首页", "从一句话开始和 AURA 对话。")
+        view = self._view("overview", "总览", "项目状态、任务流和资料库概览。")
         view.grid_columnconfigure(0, weight=1)
-        view.grid_rowconfigure(0, weight=1)
+        view.grid_rowconfigure(1, weight=1)
 
-        shell = tk.Frame(view, bg=BG_BASE)
-        shell.grid(row=0, column=0, sticky="nsew")
-        shell.grid_columnconfigure(0, weight=1)
-        shell.grid_rowconfigure(0, weight=1)
+        summary = self._workbench_section(view, "当前项目", "ResearchOS 会围绕当前项目读取资料库、任务和记忆。")
+        summary.grid(row=0, column=0, sticky="ew", padx=26, pady=(22, 14))
+        self.home_project_summary = tk.Label(summary, text="等待连接本地工作区", bg=BG_SURFACE, fg=TEXT_1, anchor="w", justify="left", font=(FONT_UI, 11))
+        self.home_project_summary.pack(fill="x")
+        self.home_status_line = tk.Label(summary, text="本地服务检测中", bg=BG_SURFACE, fg=TEXT_3, anchor="w", font=(FONT_UI, 9))
+        self.home_status_line.pack(fill="x", pady=(6, 0))
 
-        bg = tk.Canvas(shell, bg=BG_BASE, highlightthickness=0)
-        bg.grid(row=0, column=0, sticky="nsew")
+        body = ttk.Frame(view, style="Workspace.TFrame")
+        body.grid(row=1, column=0, sticky="nsew", padx=26, pady=(0, 22))
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=2)
+        body.grid_rowconfigure(0, weight=1)
 
-        content = tk.Frame(bg, bg=BG_BASE)
-        content.grid_columnconfigure(0, weight=1)
-        bg_window = bg.create_window(0, 0, window=content, anchor="nw")
+        tasks = self._workbench_section(body, "任务流", "运行中、待确认、失败和最近完成的任务。")
+        tasks.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.overview_task_rows = tk.Frame(tasks, bg=BG_SURFACE)
+        self.overview_task_rows.pack(fill="both", expand=True)
+        self._action_bar(tasks, [
+            ("刷新任务", self.load_user_tasks_summary, "primary"),
+            ("自动推进", self.run_agent_heartbeat, "secondary"),
+            ("扫描项目", self.run_research_watcher, "secondary"),
+        ]).pack(fill="x", pady=(12, 0))
 
-        def redraw_background(_event=None) -> None:
-            width = max(bg.winfo_width(), 1)
-            height = max(bg.winfo_height(), 1)
-            size_key = (width // 24, height // 24)
-            if getattr(bg, "_aura_bg_size_key", None) == size_key:
-                return
-            bg._aura_bg_size_key = size_key
-            bg.delete("aura-bg")
-            bands = [
-                "#0f1411", "#101612", "#111713", "#121814", "#131b16",
-                "#151d18", "#17201b", "#19231d", "#1b251f", "#1d2922",
-            ]
-            band_h = max(height // len(bands), 1)
-            for idx, color in enumerate(bands):
-                bg.create_rectangle(0, idx * band_h, width, (idx + 1) * band_h + 2, fill=color, outline=color, tags="aura-bg")
-            bg.create_oval(int(width * 0.70), -120, int(width * 1.05), int(height * 0.36), fill="#173d31", outline="", tags="aura-bg")
-            bg.create_oval(-100, int(height * 0.65), int(width * 0.30), int(height * 1.16), fill="#152d25", outline="", tags="aura-bg")
-            bg.create_line(0, int(height * 0.80), width, int(height * 0.56), fill="#20352d", width=1, tags="aura-bg")
-            bg.tag_lower("aura-bg")
-            bg.itemconfigure(bg_window, width=width, height=height)
+        side = ttk.Frame(body, style="Workspace.TFrame")
+        side.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        side.grid_columnconfigure(0, weight=1)
+        side.grid_rowconfigure(2, weight=1)
 
-        bg.bind("<Configure>", redraw_background)
+        resources = self._workbench_section(side, "资料库", "文献、PDF、知识库、数据和实验对象。")
+        resources.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self.overview_resource_rows = tk.Frame(resources, bg=BG_SURFACE)
+        self.overview_resource_rows.pack(fill="x")
 
-        hero = tk.Frame(content, bg=BG_BASE)
-        hero.grid(row=0, column=0, sticky="nsew", padx=30, pady=(86, 72))
-        hero.grid_columnconfigure(0, weight=1)
-        content.grid_rowconfigure(0, weight=1)
+        next_actions = self._workbench_section(side, "下一步", "少量关键动作，而不是铺满快捷卡片。")
+        next_actions.grid(row=1, column=0, sticky="ew")
+        self._action_bar(next_actions, [
+            ("问 AURA", lambda: self.show_view("agent"), "primary"),
+            ("采集文献", lambda: self.show_view("library_user"), "secondary"),
+            ("打开任务流", lambda: self.show_view("tasks_user"), "secondary"),
+        ]).pack(fill="x")
 
-        headline = tk.Canvas(hero, width=980, height=68, bg=BG_BASE, highlightthickness=0)
-        headline.grid(row=0, column=0, pady=(0, 28))
+        self.aura_toast = tk.Label(view, text="", bg=BG_SURFACE, fg=WorkbenchTheme.ACCENT_HOVER, padx=16, pady=12, font=(FONT_UI, 9, "bold"), highlightbackground=BORDER, highlightthickness=1)
+        self.render_overview_task_rows()
+        self.render_overview_resource_rows()
 
-        def draw_headline(_event=None) -> None:
-            width_key = headline.winfo_width() // 24
-            if getattr(headline, "_aura_headline_width_key", None) == width_key:
-                return
-            headline._aura_headline_width_key = width_key
-            headline.delete("all")
-            canvas_width = max(headline.winfo_width(), 980)
-            cn_font = tkfont.Font(family="Microsoft YaHei UI", size=30, weight="bold")
-            aura_font = tkfont.Font(family="Fraunces", size=36, slant="italic", weight="bold")
-            left_text = "欢迎使用"
-            aura_text = "Aura Research"
-            right_text = "，有什么可以帮忙的？"
-            total = cn_font.measure(left_text) + aura_font.measure(aura_text) + cn_font.measure(right_text) + 22
-            x = max((canvas_width - total) // 2, 8)
-            y = 34
-            headline.create_text(x, y, text=left_text, anchor="w", fill=TEXT_1, font=cn_font)
-            x += cn_font.measure(left_text) + 10
-            aura_width = aura_font.measure(aura_text)
-            headline.create_rectangle(x + 2, y + 13, x + aura_width - 2, y + 21, fill="#173d31", outline="")
-            try:
-                headline.create_text(x, y + 1, text=aura_text, anchor="w", fill="#1b4d3b", font=aura_font, angle=-1)
-                headline.create_text(x, y, text=aura_text, anchor="w", fill=ACCENT, font=aura_font, angle=-1)
-            except tk.TclError:
-                headline.create_text(x, y + 1, text=aura_text, anchor="w", fill="#1b4d3b", font=aura_font)
-                headline.create_text(x, y, text=aura_text, anchor="w", fill=ACCENT, font=aura_font)
-            x += aura_width + 12
-            headline.create_text(x, y, text=right_text, anchor="w", fill=TEXT_1, font=cn_font)
+    def render_overview_task_rows(self) -> None:
+        if not hasattr(self, "overview_task_rows"):
+            return
+        for child in self.overview_task_rows.winfo_children():
+            child.destroy()
+        tasks = self.user_task_cache[:5]
+        if not tasks:
+            self._resource_row(self.overview_task_rows, "暂无任务", "创建任务或刷新后，这里会显示任务流。", "empty")
+            return
+        for task in tasks:
+            task_type = clean(task.get("type"))
+            title = clean(task.get("title") or TASK_TYPE_LABELS.get(task_type, task_type) or "科研任务")
+            status = clean(task.get("status") or "pending")
+            tone = "active" if status == "running" else "success" if status == "completed" else "warning" if "waiting" in status else "danger" if status == "failed" else "neutral"
+            subtitle = clean(task.get("summary") or task.get("message") or task.get("task_id"))
+            self._resource_row(self.overview_task_rows, title, subtitle, TASK_STATUS_LABELS.get(status, status), tone, command=lambda: self.show_view("tasks_user"))
 
-        headline.bind("<Configure>", draw_headline)
-
-        composer = tk.Frame(hero, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        composer.grid(row=1, column=0, sticky="ew", padx=150)
-        composer.grid_columnconfigure(0, weight=1)
-        self.command_entry = tk.Text(
-            composer,
-            height=3,
-            bg=BG_SURFACE,
-            fg=TEXT_1,
-            insertbackground=TEXT_1,
-            relief="flat",
-            bd=0,
-            padx=20,
-            pady=16,
-            font=("Microsoft YaHei UI", 12),
-            wrap="word",
-        )
-        self.command_entry.grid(row=0, column=0, columnspan=2, sticky="ew")
-        placeholder = "输入关键词、实验问题、文献方向或数据分析需求，例如：肉桂渣 免疫调节 文献采集"
-        self.command_entry.insert("1.0", placeholder)
-        self.command_entry.configure(fg="#9aa692")
-
-        def clear_placeholder(_event=None) -> None:
-            if self.command_entry.get("1.0", "end-1c") == placeholder:
-                self.command_entry.delete("1.0", tk.END)
-                self.command_entry.configure(fg=TEXT_1)
-
-        def restore_placeholder(_event=None) -> None:
-            if not self.command_entry.get("1.0", "end-1c").strip():
-                self.command_entry.insert("1.0", placeholder)
-                self.command_entry.configure(fg="#9aa692")
-
-        def sync_command_text() -> None:
-            value = self.command_entry.get("1.0", "end-1c")
-            self.command_text.set("" if value == placeholder else value)
-
-        def current_home_text() -> str:
-            sync_command_text()
-            return self.command_text.get().strip()
-
-        def send_from_home() -> None:
-            value = current_home_text()
-            if not value:
-                self.show_aura_toast("先输入一个科研目标或关键词")
-                return
-            self.command_entry.delete("1.0", tk.END)
-            restore_placeholder()
-            self.command_text.set("")
-            self.open_chat_with_message(value)
-
-        def home_keydown(event) -> str | None:
-            if event.keysym == "Return" and not (event.state & 0x0001):
-                send_from_home()
-                return "break"
-            return None
-
-        self.command_entry.bind("<FocusIn>", clear_placeholder)
-        self.command_entry.bind("<FocusOut>", restore_placeholder)
-        self.command_entry.bind("<KeyRelease>", lambda _event: sync_command_text())
-        self.command_entry.bind("<Return>", home_keydown)
-
-        actions = tk.Frame(composer, bg=BG_SURFACE)
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
-        actions.grid_columnconfigure(0, weight=1)
-        tool_row = tk.Frame(actions, bg=BG_SURFACE)
-        tool_row.grid(row=0, column=0, sticky="w")
-
-        def run_context_tool(default_prompt: str, with_topic) -> None:
-            value = current_home_text()
-            if value:
-                self.command_entry.delete("1.0", tk.END)
-                restore_placeholder()
-                self.command_text.set("")
-                self.open_chat_with_message(with_topic(value))
-            else:
-                fill_quick(default_prompt)
-
-        tool_actions = [
-            ("＋ 上传", self.home_upload_file),
-            ("文献", lambda: run_context_tool("请围绕当前项目关键词采集开放文献，并把结果整理进资料库。", lambda topic: f"请围绕“{topic}”采集开放文献，并把结果整理进当前项目资料库。")),
-            ("实验", lambda: run_context_tool("请根据当前项目设计下一步实验方案，包括分组、指标、方法和验证路径。", lambda topic: f"请根据“{topic}”设计下一步实验方案，包括分组、指标、方法和验证路径。")),
-            ("数据", self.home_upload_data_file),
-            ("写作", lambda: run_context_tool("请根据当前项目记忆生成一页式科研进展汇报。", lambda topic: f"请围绕“{topic}”并结合当前项目记忆生成科研写作草稿。")),
-        ]
-        for label, command in tool_actions:
-            tk.Button(tool_row, text=label, command=command, bg=BG_SURFACE, fg=TEXT_2, activebackground=BG_HOVER, activeforeground=ACCENT, relief="flat", bd=0, padx=11, pady=8, cursor="hand2", font=("Microsoft YaHei UI", 9, "bold")).pack(side="left", padx=(0, 8))
-        send = tk.Button(actions, text="→", command=send_from_home, bg=ACCENT, fg="#07110c", activebackground="#2fd6a1", activeforeground="#07110c", relief="flat", bd=0, padx=17, pady=10, cursor="hand2", font=("Microsoft YaHei UI", 15, "bold"))
-        send.grid(row=0, column=1, sticky="e")
-
-        cards = tk.Frame(hero, bg=BG_BASE)
-        cards.grid(row=2, column=0, sticky="ew", padx=150, pady=(18, 0))
-        for idx in range(4):
-            cards.grid_columnconfigure(idx, weight=1, uniform="quick")
-        quick_prompts = [
-            ("文献采集", "输入 1 到 3 个关键词，自动检索、筛选、入库。", "帮我采集肉桂渣免疫调节相关文献，并整理成项目知识库"),
-            ("实验设计", "把研究目标转成分组、指标、方法和验证路径。", "根据我的项目设计下一步 RAW264.7 免疫调节实验方案"),
-            ("数据分析", "上传表格后自动判断统计路线和可视化方案。", "分析我上传的数据表，找出差异结果并生成图表建议"),
-            ("项目复盘", "从文献、实验、数据和失败记录生成汇报。", "根据当前项目记忆生成一页式科研进展汇报"),
-        ]
-
-        def fill_quick(text: str) -> None:
-            self.command_entry.configure(fg=TEXT_1)
-            self.command_entry.delete("1.0", tk.END)
-            self.command_entry.insert("1.0", text)
-            self.command_text.set(text)
-            self.command_entry.focus_set()
-            self.show_aura_toast("已放入输入框，可继续修改后发送")
-
-        for idx, (title, desc, text) in enumerate(quick_prompts):
-            card = tk.Frame(cards, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, cursor="hand2")
-            card.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 6, 0 if idx == 3 else 6), ipady=10)
-            card.bind("<Button-1>", lambda _event, value=text: fill_quick(value))
-            title_label = tk.Label(card, text=title, bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=("Microsoft YaHei UI", 10, "bold"), cursor="hand2")
-            title_label.pack(fill="x", padx=16, pady=(12, 5))
-            desc_label = tk.Label(card, text=desc, bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=160, font=("Microsoft YaHei UI", 9), cursor="hand2")
-            desc_label.pack(fill="x", padx=16, pady=(0, 12))
-            title_label.bind("<Button-1>", lambda _event, value=text: fill_quick(value))
-            desc_label.bind("<Button-1>", lambda _event, value=text: fill_quick(value))
-
-        self.home_project_summary = tk.Label(shell, text="当前项目：等待连接本地工作区", bg=BG_BASE, fg=TEXT_3, font=("Microsoft YaHei UI", 1))
-        self.home_status_line = tk.Label(shell, text="本地连接检测中 · 模型检测中", bg=BG_BASE, fg=TEXT_3, font=("Microsoft YaHei UI", 1))
-        self.aura_toast = tk.Label(view, text="", bg=BG_SURFACE, fg=ACCENT, padx=16, pady=12, font=("Microsoft YaHei UI", 9, "bold"), highlightbackground=BORDER, highlightthickness=1)
-
-        def responsive(_event=None) -> None:
-            width = view.winfo_width()
-            if width and width < 760:
-                headline.configure(width=max(width - 36, 320))
-                cards.grid_configure(padx=18)
-                composer.grid_configure(padx=18)
-                for idx, child in enumerate(cards.winfo_children()):
-                    child.grid_configure(row=idx, column=0, sticky="ew", padx=0, pady=(0, 12))
-            else:
-                headline.configure(width=980)
-                cards.grid_configure(padx=150)
-                composer.grid_configure(padx=150)
-                for idx, child in enumerate(cards.winfo_children()):
-                    child.grid_configure(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 6, 0 if idx == 3 else 6), pady=0)
-
-        view.bind("<Configure>", responsive)
+    def render_overview_resource_rows(self) -> None:
+        if not hasattr(self, "overview_resource_rows"):
+            return
+        for child in self.overview_resource_rows.winfo_children():
+            child.destroy()
+        self._resource_row(self.overview_resource_rows, "文献与 PDF", "采集、导入、重解析和构建知识库。", "资料库", command=lambda: self.show_view("library_user"))
+        self._resource_row(self.overview_resource_rows, "数据与实验", "上传数据，管理实验、样品、结论和失败记录。", "数据", command=lambda: self.show_view("data"))
+        self._resource_row(self.overview_resource_rows, "项目记忆", "查看摘要、证据和下一步建议。", "记忆", command=lambda: self.show_view("memory"))
 
     def _build_workspace_user(self) -> None:
         view = self._view("workspace_user", "工作区", "当前项目、项目记忆和下一步建议。")
@@ -1513,6 +1372,9 @@ class ResearchOSClientApp:
                     child.destroy()
                 for suggestion in suggestions[:5]:
                     tk.Button(self.workspace_suggestion_frame, text=suggestion, command=lambda value=suggestion: self.open_chat_with_message(value), bg=ACCENT_DIM, fg=ACCENT, activebackground=BG_HOVER, activeforeground=ACCENT, relief="flat", bd=0, padx=12, pady=7, cursor="hand2", font=("Microsoft YaHei UI", 9)).pack(fill="x", pady=(0, 6))
+        if hasattr(self, "home_status_line"):
+            self.home_status_line.configure(text=f"本地服务：{self.settings_health_status.get()} · AURA：{self.settings_dual_status.get()}")
+        self.render_overview_resource_rows()
 
     def load_library_summary(self) -> None:
         project_id = self.default_project_id()
@@ -1921,6 +1783,7 @@ class ResearchOSClientApp:
         if not shown:
             self.user_tasks_list.insert(tk.END, "暂无符合条件的任务。")
         self.user_task_visible_cache = shown
+        self.render_overview_task_rows()
 
     def selected_user_task(self) -> dict:
         if not hasattr(self, "user_tasks_list"):
