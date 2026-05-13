@@ -427,6 +427,8 @@ class ResearchOSClientApp:
     def handle_responsive_shell(self, _event=None) -> None:
         if not hasattr(self, "sidebar"):
             return
+        if not self.root.winfo_exists() or not self.sidebar.winfo_exists():
+            return
         width = self.root.winfo_width()
         if width and width < 760:
             if self.sidebar.winfo_ismapped():
