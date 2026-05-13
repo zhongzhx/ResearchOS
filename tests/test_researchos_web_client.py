@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import unittest
 from pathlib import Path
@@ -6,18 +5,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_CLIENT = ROOT / "web_client"
-WEB_SERVER = ROOT / "researchos_web_client.py"
 PACKAGE_JSON = ROOT / "package.json"
 ELECTRON_MAIN = ROOT / "electron" / "main.js"
-
-
-def load_web_module():
-    spec = importlib.util.spec_from_file_location("researchos_web_client", WEB_SERVER)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load web client module from {WEB_SERVER}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+LEGACY_CLIENT_FILES = [
+    ROOT / "researchos_local_client.pyw",
+    ROOT / "researchos_web_client.py",
+    ROOT / "tests" / "test_local_client_boot.py",
+    ROOT / "tests" / "test_researchos_local_client_project_actions.py",
+]
 
 
 class ResearchOSWebClientTests(unittest.TestCase):
@@ -41,19 +36,13 @@ class ResearchOSWebClientTests(unittest.TestCase):
         self.assertIn("--radius-md: 24px", css)
         self.assertNotIn("border-radius: 0", css)
 
-    def test_web_server_proxies_backend_same_origin(self) -> None:
-        module = load_web_module()
-
-        self.assertEqual(module.WEB_ROOT, WEB_CLIENT)
-        self.assertTrue(hasattr(module.WebClientHandler, "proxy_backend"))
-        self.assertIn("/api/backend", WEB_SERVER.read_text(encoding="utf-8"))
-
     def test_electron_package_declares_desktop_client_entry(self) -> None:
         package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
 
         self.assertEqual(package["main"], "electron/main.js")
         self.assertEqual(package["scripts"]["client:electron"], "electron .")
         self.assertEqual(package["scripts"]["client:electron:smoke"], "electron . --smoke-test")
+        self.assertNotIn("client:web", package["scripts"])
         self.assertIn("electron", package["devDependencies"])
 
     def test_electron_main_loads_html_client_without_tk_shell(self) -> None:
@@ -65,6 +54,11 @@ class ResearchOSWebClientTests(unittest.TestCase):
         self.assertIn("nodeIntegration: false", source)
         self.assertIn("--smoke-test", source)
         self.assertNotIn("tkinter", source.lower())
+
+    def test_legacy_python_clients_are_removed(self) -> None:
+        for path in LEGACY_CLIENT_FILES:
+            with self.subTest(path=path.name):
+                self.assertFalse(path.exists())
 
 
 if __name__ == "__main__":

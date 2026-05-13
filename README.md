@@ -10,7 +10,8 @@ ResearchOS 是一个面向科研工作流的本地双 Agent 系统。项目把�
 ├── skills/researchos_skill_library/ # 规范化分类后的技能库
 ├── browser-use/                     # 浏览器自动化能力源码
 ├── opendataloader-pdf/              # PDF 文献解析/加载能力源码
-├── researchos_local_client.pyw      # Windows 本地客户端
+├── electron/                        # Electron HTML 本地客户端壳
+├── web_client/                      # HTML/CSS/JS 客户端界面
 ├── run_researchos_local_api.ps1     # 本地 API 启动脚本
 ├── run_researchos_local_api.cmd     # Windows 一键启动入口
 └── tests/                           # 后端和技能路由测试
@@ -38,6 +39,14 @@ ResearchOS 是一个面向科研工作流的本地双 Agent 系统。项目把�
 这些模块会读取技能目录和 catalog，将用户需求路由到 pipeline，再解析 canonical skill path，避免模型只知道旧路径或找不到技能位置。
 
 ## 本地启动
+
+启动本地桌面客户端：
+
+```powershell
+npm run client:electron
+```
+
+客户端界面由 `web_client/` 的 HTML/CSS/JS 实现，Electron 负责本地桌面窗口、静态资源服务和后端 API 代理。
 
 在 Windows 上可以直接运行：
 

@@ -6,8 +6,7 @@
   "main": "electron/main.js",
   "scripts": {
     "client:electron": "electron .",
-    "client:electron:smoke": "electron . --smoke-test",
-    "client:web": "py researchos_web_client.py --host 127.0.0.1 --port 58259 --open"
+    "client:electron:smoke": "electron . --smoke-test"
   },
   "devDependencies": {
     "electron": "^39.8.10"
