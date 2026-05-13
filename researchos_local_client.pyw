@@ -36,48 +36,69 @@ API_PROCESS_NAME = "AURA Research.exe"
 API_PYTHON_HOME = ""
 DESTRUCTIVE_CONFIRMATION_WORD = "确定"
 
-BG_DEEP = "#0f1411"
-BG_BASE = "#121814"
-BG_SURFACE = "#18211c"
-BG_ELEVATED = "#1f2a24"
-BG_HOVER = "#26342d"
-BG_INPUT = "#101612"
-BORDER = "#2d3a33"
-BORDER_SUBTLE = "#243029"
-TEXT_1 = "#f5f7f3"
-TEXT_2 = "#c7d0c8"
-TEXT_3 = "#7f8c83"
-ACCENT = "#00d992"
-ACCENT_DIM = "#173d31"
-BLUE = "#3b82f6"
-WARN = "#f5a623"
-BAD = "#ef4444"
-CARD_RADIUS_NOTE = "8px"
-FONT_UI = "Microsoft YaHei UI"
-FONT_MONO = "Consolas"
+class WorkbenchTheme:
+    CANVAS = "#010102"
+    SURFACE_1 = "#0f1011"
+    SURFACE_2 = "#141516"
+    SURFACE_3 = "#18191a"
+    HAIRLINE = "#23252a"
+    HAIRLINE_STRONG = "#34343a"
+    INK = "#f7f8f8"
+    MUTED = "#d0d6e0"
+    SUBTLE = "#8a8f98"
+    ACCENT = "#5e6ad2"
+    ACCENT_HOVER = "#828fff"
+    SUCCESS = "#27a644"
+    WARNING = "#ffc533"
+    DANGER = "#ff6161"
+    PANEL_RADIUS_NOTE = "8-12px"
 
-USER_NAV = [
-    ("overview", "首页"),
-    ("agent", "问 AURA"),
-    ("workspace_user", "工作区"),
+
+PRIMARY_WORKSPACES = [
+    ("overview", "总览"),
+    ("tasks_user", "任务流"),
     ("library_user", "资料库"),
-    ("tasks_user", "任务"),
-    ("settings", "设置"),
+    ("agent", "AURA"),
+    ("memory", "项目记忆"),
 ]
 
-DEV_NAV = [
-    ("functions", "开发者控制台"),
+
+DEVELOPER_WORKSPACES = [
     ("skills", "技能注册表"),
-    ("memory", "原始记忆"),
-    ("projects", "项目/文件"),
-    ("literature", "文献采集调试"),
-    ("knowledge", "知识库调试"),
+    ("projects", "项目/文件调试"),
     ("data", "数据调试"),
     ("experiments", "实验调试"),
     ("samples", "样品调试"),
     ("feed", "任务原始状态"),
-    ("api", "API 调试日志"),
+    ("functions", "开发者控制台"),
+    ("literature", "文献采集调试"),
+    ("knowledge", "知识库调试"),
+    ("api", "API 调试"),
 ]
+
+
+BG_DEEP = WorkbenchTheme.CANVAS
+BG_BASE = WorkbenchTheme.CANVAS
+BG_SURFACE = WorkbenchTheme.SURFACE_1
+BG_ELEVATED = WorkbenchTheme.SURFACE_2
+BG_HOVER = WorkbenchTheme.SURFACE_3
+BG_INPUT = "#090a0b"
+BORDER = WorkbenchTheme.HAIRLINE
+BORDER_SUBTLE = WorkbenchTheme.HAIRLINE
+TEXT_1 = WorkbenchTheme.INK
+TEXT_2 = WorkbenchTheme.MUTED
+TEXT_3 = WorkbenchTheme.SUBTLE
+ACCENT = WorkbenchTheme.ACCENT
+ACCENT_DIM = "#171b35"
+BLUE = WorkbenchTheme.ACCENT_HOVER
+WARN = WorkbenchTheme.WARNING
+BAD = WorkbenchTheme.DANGER
+CARD_RADIUS_NOTE = WorkbenchTheme.PANEL_RADIUS_NOTE
+FONT_UI = "Microsoft YaHei UI"
+FONT_MONO = "Consolas"
+
+USER_NAV = PRIMARY_WORKSPACES
+DEV_NAV = DEVELOPER_WORKSPACES
 
 CAPABILITY_PROMPTS = {
     "文献采集": "请围绕当前项目关键词采集开放文献，并把结果整理进资料库。",
@@ -164,44 +185,6 @@ TASK_FILTERS = {
     "已完成": "completed",
     "失败": "failed",
 }
-
-class WorkbenchTheme:
-    CANVAS = "#010102"
-    SURFACE_1 = "#0f1011"
-    SURFACE_2 = "#141516"
-    SURFACE_3 = "#18191a"
-    HAIRLINE = "#23252a"
-    HAIRLINE_STRONG = "#34343a"
-    INK = "#f7f8f8"
-    MUTED = "#d0d6e0"
-    SUBTLE = "#8a8f98"
-    ACCENT = "#5e6ad2"
-    ACCENT_HOVER = "#828fff"
-    SUCCESS = "#27a644"
-    WARNING = "#ffc533"
-    DANGER = "#ff6161"
-    PANEL_RADIUS_NOTE = "8-12px"
-
-
-PRIMARY_WORKSPACES = [
-    ("overview", "总览"),
-    ("tasks_user", "任务流"),
-    ("library_user", "资料库"),
-    ("agent", "AURA"),
-    ("memory", "项目记忆"),
-]
-
-
-DEVELOPER_WORKSPACES = [
-    ("skills", "技能注册表"),
-    ("projects", "项目/文件调试"),
-    ("data", "数据调试"),
-    ("experiments", "实验调试"),
-    ("samples", "样品调试"),
-    ("feed", "任务原始状态"),
-    ("functions", "开发者控制台"),
-    ("api", "API 调试"),
-]
 
 USER_FEATURE_MAP = {
     "问 AURA": "首页",
@@ -361,10 +344,10 @@ class ResearchOSClientApp:
         self.library_reference_cache: list[dict] = []
         self.library_data_cache: list[dict] = []
         self.workspace_memory_cache: list[dict] = []
-        self.dock_expanded = False
+        self.dock_expanded = True
         self.dock_hide_after = ""
         self.sidebar_animation_after = ""
-        self.sidebar_target_width = 88
+        self.sidebar_target_width = 230
         self.reference_cache: list[dict] = []
         self._project_syncing = False
         self.agent_citations: dict[str, dict] = {}
@@ -390,16 +373,16 @@ class ResearchOSClientApp:
         style.configure("Panel.TLabel", background=BG_SURFACE, foreground=TEXT_1)
         style.configure("Muted.TLabel", background=BG_BASE, foreground=TEXT_2)
         style.configure("PanelMuted.TLabel", background=BG_SURFACE, foreground=TEXT_2)
-        style.configure("Title.TLabel", background=BG_BASE, foreground=TEXT_1, font=(FONT_UI, 20, "bold"))
+        style.configure("Title.TLabel", background=BG_BASE, foreground=TEXT_1, font=(FONT_UI, 18, "bold"))
         style.configure("PanelTitle.TLabel", background=BG_SURFACE, foreground=TEXT_1, font=(FONT_UI, 11, "bold"))
-        style.configure("TEntry", fieldbackground=BG_INPUT, foreground=TEXT_1, insertcolor=TEXT_1, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(10, 8))
-        style.configure("TCombobox", fieldbackground=BG_INPUT, foreground=TEXT_1, arrowcolor=TEXT_2, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(8, 7))
+        style.configure("TEntry", fieldbackground=BG_INPUT, foreground=TEXT_1, insertcolor=TEXT_1, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(12, 9))
+        style.configure("TCombobox", fieldbackground=BG_INPUT, foreground=TEXT_1, arrowcolor=TEXT_2, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(10, 8))
         style.map("TCombobox", fieldbackground=[("readonly", BG_INPUT)], foreground=[("readonly", TEXT_1)])
-        style.configure("Treeview", rowheight=34, background=BG_INPUT, fieldbackground=BG_INPUT, foreground=TEXT_1, bordercolor=BORDER_SUBTLE, lightcolor=BORDER_SUBTLE, darkcolor=BORDER_SUBTLE)
+        style.configure("Treeview", rowheight=38, background=BG_INPUT, fieldbackground=BG_INPUT, foreground=TEXT_1, bordercolor=BORDER_SUBTLE, lightcolor=BORDER_SUBTLE, darkcolor=BORDER_SUBTLE)
         style.configure("Treeview.Heading", background=BG_SURFACE, foreground=TEXT_2, font=(FONT_UI, 9, "bold"), relief="flat")
         style.map("Treeview", background=[("selected", ACCENT_DIM)], foreground=[("selected", TEXT_1)])
-        style.configure("Accent.TButton", background=ACCENT, foreground="#07110c", bordercolor=ACCENT, focusthickness=0, padding=(16, 10), font=(FONT_UI, 10, "bold"))
-        style.map("Accent.TButton", background=[("active", "#2fd6a1"), ("pressed", "#10b981")], foreground=[("active", "#07110c"), ("pressed", "#07110c")])
+        style.configure("Accent.TButton", background=ACCENT, foreground="#ffffff", bordercolor=ACCENT, focusthickness=0, padding=(16, 10), font=(FONT_UI, 10, "bold"))
+        style.map("Accent.TButton", background=[("active", WorkbenchTheme.ACCENT_HOVER), ("pressed", ACCENT)], foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
         style.configure("Secondary.TButton", background=BG_SURFACE, foreground=TEXT_1, bordercolor=BORDER, focusthickness=0, padding=(14, 9))
         style.map("Secondary.TButton", background=[("active", BG_HOVER)])
         style.configure("Ghost.TButton", background=BG_BASE, foreground=TEXT_2, bordercolor=BG_BASE, focusthickness=0, padding=(10, 8))
@@ -414,7 +397,7 @@ class ResearchOSClientApp:
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = tk.Frame(self.root, bg=BG_DEEP, width=88, highlightthickness=1, highlightbackground=BORDER)
+        self.sidebar = tk.Frame(self.root, bg=BG_DEEP, width=230, highlightthickness=1, highlightbackground=BORDER)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
         self.sidebar.bind("<Enter>", self.expand_sidebar)
@@ -511,12 +494,11 @@ class ResearchOSClientApp:
             child.destroy()
         self.nav_buttons = {}
         user_items = [
-            ("overview", "新任务", "✦"),
-            ("workspace_user", "项目空间", "⌁"),
-            ("library_user", "文献采集", "◫"),
-            ("data", "数据分析", "▣"),
-            ("knowledge", "知识库", "◎"),
-            ("settings", "设置", "⌘"),
+            ("overview", "总览", "⌁"),
+            ("tasks_user", "任务流", "●"),
+            ("library_user", "资料库", "◫"),
+            ("agent", "AURA", "AI"),
+            ("memory", "项目记忆", "◎"),
         ]
         for key, title, icon in user_items:
             self._nav_button(self.dock, key, title, title, icon)
@@ -611,6 +593,12 @@ class ResearchOSClientApp:
             self.animate_sidebar_width(260)
 
     def collapse_sidebar(self, _event=None) -> None:
+        if self.root.winfo_width() >= 760:
+            self.dock_expanded = True
+            self._sync_sidebar_labels()
+            if hasattr(self, "sidebar"):
+                self.sidebar.configure(width=230)
+            return
         x = self.root.winfo_pointerx()
         y = self.root.winfo_pointery()
         target = self.root.winfo_containing(x, y)
@@ -659,23 +647,42 @@ class ResearchOSClientApp:
         header = ttk.Frame(self.workspace, style="Workspace.TFrame")
         header.grid(row=0, column=0, sticky="ew", padx=26, pady=(18, 0))
         header.grid_columnconfigure(0, weight=1)
+
         self.shell_title_block = ttk.Frame(header, style="Workspace.TFrame")
-        self.shell_title_block.grid(row=0, column=0, sticky="w")
+        self.shell_title_block.grid(row=1, column=0, sticky="w", pady=(12, 0))
         ttk.Label(self.shell_title_block, textvariable=self.workspace_title, style="Title.TLabel").pack(anchor="w")
         ttk.Label(self.shell_title_block, textvariable=self.workspace_subtitle, style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
-        self.dual_status_pill = tk.Label(header, text="● 本地知识库已连接", bg=BG_SURFACE, fg=TEXT_2, padx=15, pady=10, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2")
-        self.dual_status_pill.grid(row=0, column=1, sticky="e", padx=(10, 0))
-        self.dual_status_pill.bind("<Button-1>", lambda _event: self.show_view("library_user"))
-        self.task_count_pill = tk.Label(header, text="今天 3 个任务待推进", bg=BG_SURFACE, fg=TEXT_2, padx=15, pady=10, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2")
-        self.task_count_pill.grid(row=0, column=2, sticky="e", padx=(12, 0))
+
+        self.global_command = tk.Entry(
+            header,
+            bg=BG_INPUT,
+            fg=TEXT_3,
+            insertbackground=TEXT_1,
+            relief="flat",
+            bd=0,
+            font=(FONT_UI, 11),
+        )
+        self.global_command_placeholder = "搜索项目、文献、任务，或输入科研命令"
+        self.global_command.insert(0, self.global_command_placeholder)
+        self.global_command.grid(row=0, column=0, sticky="ew", ipady=12, padx=(0, 12))
+        self.global_command.bind("<Return>", self.run_global_command)
+        self.global_command.bind("<FocusIn>", self.clear_global_command_placeholder)
+        self.global_command.bind("<FocusOut>", self.restore_global_command_placeholder)
+
+        ttk.Button(header, text="新建任务", style="Accent.TButton", command=lambda: self.show_view("tasks_user")).grid(row=0, column=1, sticky="e")
+        self.dual_status_pill = tk.Label(header, text="本地服务检测中", bg=BG_SURFACE, fg=TEXT_2, padx=13, pady=10, font=(FONT_UI, 9, "bold"), cursor="hand2")
+        self.dual_status_pill.grid(row=0, column=2, sticky="e", padx=(10, 0))
+        self.dual_status_pill.bind("<Button-1>", lambda _event: self.show_view("settings"))
+        self.task_count_pill = tk.Label(header, text="任务流", bg=BG_SURFACE, fg=TEXT_2, padx=13, pady=10, font=(FONT_UI, 9, "bold"), cursor="hand2")
+        self.task_count_pill.grid(row=0, column=3, sticky="e", padx=(10, 0))
         self.task_count_pill.bind("<Button-1>", lambda _event: self.show_view("tasks_user"))
-        self.profile_pill = tk.Label(header, text="  ●  正栩", bg=BG_SURFACE, fg=TEXT_2, padx=15, pady=10, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2")
-        self.profile_pill.grid(row=0, column=3, sticky="e", padx=(12, 0))
+        self.profile_pill = tk.Label(header, text="设置", bg=BG_SURFACE, fg=TEXT_2, padx=13, pady=10, font=(FONT_UI, 9, "bold"), cursor="hand2")
+        self.profile_pill.grid(row=0, column=4, sticky="e", padx=(10, 0))
         self.profile_pill.bind("<Button-1>", lambda _event: self.show_view("settings"))
         self.dev_command_button = ttk.Button(header, text="开发者控制台", style="Secondary.TButton", command=lambda: self.show_view("functions"))
-        self.dev_command_button.grid(row=1, column=2, sticky="e", padx=(10, 0), pady=(8, 0))
+        self.dev_command_button.grid(row=1, column=3, sticky="e", padx=(10, 0), pady=(8, 0))
         self.dev_demo_button = ttk.Button(header, text="开发者演示", style="Accent.TButton", command=self.run_dual_agent_demo)
-        self.dev_demo_button.grid(row=1, column=3, sticky="e", padx=(10, 0), pady=(8, 0))
+        self.dev_demo_button.grid(row=1, column=4, sticky="e", padx=(10, 0), pady=(8, 0))
         if not self.developer_mode.get():
             self.dev_command_button.grid_remove()
             self.dev_demo_button.grid_remove()
@@ -717,15 +724,56 @@ class ResearchOSClientApp:
         setattr(frame, "_view_subtitle", subtitle)
         return frame
 
-    def _panel(self, parent, title: str, subtitle: str = "") -> ttk.Frame:
+    def _workbench_section(self, parent, title: str, subtitle: str = "") -> tk.Frame:
         outer = tk.Frame(parent, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=18, pady=16)
         if title:
-            tk.Label(outer, text=title, bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 11, "bold")).pack(anchor="w")
+            tk.Label(outer, text=title, bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 12, "bold")).pack(anchor="w")
         if subtitle:
-            tk.Label(outer, text=subtitle, bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=620, font=(FONT_UI, 9)).pack(anchor="w", pady=(2, 10))
+            tk.Label(outer, text=subtitle, bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=760, font=(FONT_UI, 9)).pack(anchor="w", pady=(4, 14))
         else:
-            tk.Frame(outer, bg=BG_SURFACE, height=8).pack()
+            tk.Frame(outer, bg=BG_SURFACE, height=10).pack()
         return outer
+
+    def _status_pill(self, parent, text: str, tone: str = "neutral") -> tk.Label:
+        colors = {
+            "neutral": (BG_ELEVATED, TEXT_2),
+            "active": ("#171b35", WorkbenchTheme.ACCENT_HOVER),
+            "success": ("#102016", WorkbenchTheme.SUCCESS),
+            "warning": ("#241f0d", WorkbenchTheme.WARNING),
+            "danger": ("#241214", WorkbenchTheme.DANGER),
+        }
+        bg, fg = colors.get(tone, colors["neutral"])
+        return tk.Label(parent, text=text, bg=bg, fg=fg, padx=10, pady=4, font=(FONT_UI, 9, "bold"))
+
+    def _resource_row(self, parent, title: str, subtitle: str, meta: str = "", tone: str = "neutral", command=None) -> tk.Frame:
+        row = tk.Frame(parent, bg=BG_SURFACE, cursor="hand2" if command else "")
+        row.pack(fill="x", pady=(0, 1))
+        body = tk.Frame(row, bg=BG_SURFACE)
+        body.pack(side="left", fill="x", expand=True, padx=(0, 12), pady=10)
+        tk.Label(body, text=title, bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 10, "bold")).pack(fill="x")
+        tk.Label(body, text=subtitle, bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=520, font=(FONT_UI, 9)).pack(fill="x", pady=(3, 0))
+        if meta:
+            self._status_pill(row, meta, tone).pack(side="right", pady=10)
+        if command:
+            row.bind("<Button-1>", lambda _event: command())
+            body.bind("<Button-1>", lambda _event: command())
+        return row
+
+    def _action_bar(self, parent, actions: list[tuple[str, object, str]]) -> tk.Frame:
+        bar = tk.Frame(parent, bg=BG_SURFACE)
+        for label, command, kind in actions:
+            style = "Accent.TButton" if kind == "primary" else "Secondary.TButton"
+            ttk.Button(bar, text=label, style=style, command=command).pack(side="left", padx=(0, 8), pady=(0, 4))
+        return bar
+
+    def _set_text(self, widget: ScrolledText, value: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", value)
+        widget.configure(state="disabled")
+
+    def _panel(self, parent, title: str, subtitle: str = "") -> ttk.Frame:
+        return self._workbench_section(parent, title, subtitle)
 
     def _text(self, parent, height: int = 12) -> ScrolledText:
         box = ScrolledText(parent, height=height, bg=BG_INPUT, fg=TEXT_1, insertbackground=TEXT_1, selectbackground=ACCENT_DIM, relief="flat", bd=0, padx=13, pady=13, font=(FONT_MONO, 10), wrap="word")
@@ -2182,6 +2230,31 @@ class ResearchOSClientApp:
             return
         box.delete("1.0", tk.END)
         box.insert("1.0", text.strip() or self.task_empty_text(key))
+
+    def clear_global_command_placeholder(self, _event=None) -> None:
+        if not hasattr(self, "global_command"):
+            return
+        if self.global_command.get() == getattr(self, "global_command_placeholder", ""):
+            self.global_command.delete(0, tk.END)
+            self.global_command.configure(fg=TEXT_1)
+
+    def restore_global_command_placeholder(self, _event=None) -> None:
+        if not hasattr(self, "global_command"):
+            return
+        if not self.global_command.get().strip():
+            self.global_command.insert(0, getattr(self, "global_command_placeholder", ""))
+            self.global_command.configure(fg=TEXT_3)
+
+    def run_global_command(self, _event=None) -> str:
+        value = clean(self.global_command.get() if hasattr(self, "global_command") else "")
+        if not value or value == getattr(self, "global_command_placeholder", ""):
+            self.show_aura_toast("先输入一个科研命令")
+            return "break"
+        self.open_chat_with_message(value)
+        if hasattr(self, "global_command"):
+            self.global_command.delete(0, tk.END)
+            self.restore_global_command_placeholder()
+        return "break"
 
     def start_command_task(self) -> None:
         message = clean(self.command_text.get())
