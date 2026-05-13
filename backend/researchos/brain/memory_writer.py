@@ -65,6 +65,48 @@ def write_decision_memory(reflection_or_result: dict[str, Any]) -> dict[str, Any
     return _write_page("decision", reflection_or_result.get("project_id", ""), reflection_or_result.get("title", "Decision Memory"), reflection_or_result.get("compiled_truth", ""), reflection_or_result.get("source_ids", []), reflection_or_result.get("confidence", "medium"))
 
 
+MEMORY_WRITERS = {
+    "project": write_project_memory,
+    "experiment": write_experiment_memory,
+    "paper": write_paper_memory,
+    "dataset": write_dataset_memory,
+    "claim": write_claim_memory,
+    "failure": write_failure_memory,
+    "decision": write_decision_memory,
+}
+
+
+def write_memory_from_promotion_decision(promotion_decision: dict[str, Any]) -> dict[str, Any]:
+    pages = []
+    rejected = list(promotion_decision.get("rejected_items") or [])
+    project_id = str(promotion_decision.get("project_id") or "")
+    for item in promotion_decision.get("memory_items") or []:
+        page_type = str(item.get("page_type") or "")
+        writer = MEMORY_WRITERS.get(page_type)
+        if not writer:
+            rejected.append({"target": page_type or "unknown", "reason": "unsupported memory page_type"})
+            continue
+        payload = {
+            "project_id": project_id,
+            "title": item.get("title") or f"{page_type.title()} Memory",
+            "compiled_truth": item.get("compiled_truth") or "",
+            "source_ids": item.get("source_ids") or [],
+            "confidence": item.get("confidence") or "low",
+            "tags": item.get("tags") or [],
+        }
+        if not payload["compiled_truth"]:
+            rejected.append({"target": page_type, "reason": "empty compiled truth"})
+            continue
+        pages.append(writer(payload))
+    return {
+        "control_skill": "memory_commit",
+        "project_id": project_id,
+        "pages": pages,
+        "rejected_items": rejected,
+        "required_human_review": bool(promotion_decision.get("required_human_review")),
+    }
+
+
 def write_memory_from_execution_result(result: ExecutionResult, decision: BrainDecision, task_spec: TaskSpec) -> dict[str, Any]:
     project_id = task_spec.project_id or ""
     source_ids = _source_ids(result)

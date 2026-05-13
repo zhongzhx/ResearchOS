@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Any
 
 from backend.researchos.agents.agent_protocol import TaskSpec
-from backend.researchos.skills.pipeline_registry import load_skill_catalog, resolve_skill_path
+from backend.researchos.skills.skill_catalog_loader import load_skill_catalog, resolve_skill_path, validate_skill_status
 
 from .runtime_adapter import default_agent_root, import_research_os_mvp
 
@@ -66,6 +66,10 @@ def resolve_required_skill(skill_name: str, agent_root: Path | None = None) -> d
     status = str(skill.get("status") or "").strip()
     if status in INACTIVE_STATUSES:
         raise PermissionError(f"skill is not active: {skill_name}")
+    catalog_validation = validate_skill_status(key, require_active=True)
+    if catalog_validation.get("status") != "missing" and not catalog_validation.get("valid"):
+        raise PermissionError("; ".join(catalog_validation.get("errors") or [f"skill is not active: {skill_name}"]))
+    canonical_path = str(catalog_validation.get("canonical_path") or canonical_path)
     result = dict(skill)
     result["canonical_path"] = canonical_path or str(skill.get("canonical_path") or skill.get("source_path") or "")
     return result

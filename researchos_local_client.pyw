@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, simpledialog
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
@@ -35,22 +36,25 @@ API_PROCESS_NAME = "AURA Research.exe"
 API_PYTHON_HOME = ""
 DESTRUCTIVE_CONFIRMATION_WORD = "确定"
 
-BG_DEEP = "#F6F7F4"
-BG_BASE = "#F6F7F4"
-BG_SURFACE = "#ffffff"
-BG_ELEVATED = "#F7F8F5"
-BG_HOVER = "#E8EEE9"
-BG_INPUT = "#FBFCFA"
-BORDER = "#E5E7E1"
-BORDER_SUBTLE = "#EDF0EA"
-TEXT_1 = "#253128"
-TEXT_2 = "#647067"
-TEXT_3 = "#9AA39B"
-ACCENT = "#6F9278"
-ACCENT_DIM = "#EEF5EF"
+BG_DEEP = "#0f1411"
+BG_BASE = "#121814"
+BG_SURFACE = "#18211c"
+BG_ELEVATED = "#1f2a24"
+BG_HOVER = "#26342d"
+BG_INPUT = "#101612"
+BORDER = "#2d3a33"
+BORDER_SUBTLE = "#243029"
+TEXT_1 = "#f5f7f3"
+TEXT_2 = "#c7d0c8"
+TEXT_3 = "#7f8c83"
+ACCENT = "#00d992"
+ACCENT_DIM = "#173d31"
 BLUE = "#3b82f6"
 WARN = "#f5a623"
 BAD = "#ef4444"
+CARD_RADIUS_NOTE = "8px"
+FONT_UI = "Microsoft YaHei UI"
+FONT_MONO = "Consolas"
 
 USER_NAV = [
     ("overview", "首页"),
@@ -249,7 +253,7 @@ class ResearchOSClientApp:
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME} 本地科研工作台")
         self.root.geometry("1560x960")
-        self.root.minsize(1260, 780)
+        self.root.minsize(390, 640)
         self.root.configure(bg=BG_DEEP)
 
         self.api = ApiClient(BASE_URL)
@@ -321,6 +325,8 @@ class ResearchOSClientApp:
         self.workspace_memory_cache: list[dict] = []
         self.dock_expanded = False
         self.dock_hide_after = ""
+        self.sidebar_animation_after = ""
+        self.sidebar_target_width = 88
         self.reference_cache: list[dict] = []
         self._project_syncing = False
         self.agent_citations: dict[str, dict] = {}
@@ -337,7 +343,7 @@ class ResearchOSClientApp:
     def _build_style(self) -> None:
         style = ttk.Style(self.root)
         style.theme_use("clam")
-        style.configure(".", font=("Microsoft YaHei UI", 10))
+        style.configure(".", font=(FONT_UI, 10), background=BG_BASE, foreground=TEXT_1)
         style.configure("App.TFrame", background=BG_DEEP)
         style.configure("Workspace.TFrame", background=BG_BASE)
         style.configure("Panel.TFrame", background=BG_SURFACE)
@@ -346,39 +352,45 @@ class ResearchOSClientApp:
         style.configure("Panel.TLabel", background=BG_SURFACE, foreground=TEXT_1)
         style.configure("Muted.TLabel", background=BG_BASE, foreground=TEXT_2)
         style.configure("PanelMuted.TLabel", background=BG_SURFACE, foreground=TEXT_2)
-        style.configure("Title.TLabel", background=BG_BASE, foreground=TEXT_1, font=("Microsoft YaHei UI", 20, "bold"))
-        style.configure("PanelTitle.TLabel", background=BG_SURFACE, foreground=TEXT_1, font=("Microsoft YaHei UI", 11, "bold"))
+        style.configure("Title.TLabel", background=BG_BASE, foreground=TEXT_1, font=(FONT_UI, 20, "bold"))
+        style.configure("PanelTitle.TLabel", background=BG_SURFACE, foreground=TEXT_1, font=(FONT_UI, 11, "bold"))
         style.configure("TEntry", fieldbackground=BG_INPUT, foreground=TEXT_1, insertcolor=TEXT_1, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(10, 8))
         style.configure("TCombobox", fieldbackground=BG_INPUT, foreground=TEXT_1, arrowcolor=TEXT_2, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(8, 7))
         style.map("TCombobox", fieldbackground=[("readonly", BG_INPUT)], foreground=[("readonly", TEXT_1)])
         style.configure("Treeview", rowheight=34, background=BG_INPUT, fieldbackground=BG_INPUT, foreground=TEXT_1, bordercolor=BORDER_SUBTLE, lightcolor=BORDER_SUBTLE, darkcolor=BORDER_SUBTLE)
-        style.configure("Treeview.Heading", background=BG_SURFACE, foreground=TEXT_2, font=("Microsoft YaHei UI", 9, "bold"), relief="flat")
+        style.configure("Treeview.Heading", background=BG_SURFACE, foreground=TEXT_2, font=(FONT_UI, 9, "bold"), relief="flat")
         style.map("Treeview", background=[("selected", ACCENT_DIM)], foreground=[("selected", TEXT_1)])
-        style.configure("Accent.TButton", background=ACCENT, foreground="#ffffff", bordercolor=ACCENT, focusthickness=0, padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"))
-        style.map("Accent.TButton", background=[("active", "#5F806A"), ("pressed", "#526F5B")])
+        style.configure("Accent.TButton", background=ACCENT, foreground="#07110c", bordercolor=ACCENT, focusthickness=0, padding=(16, 10), font=(FONT_UI, 10, "bold"))
+        style.map("Accent.TButton", background=[("active", "#2fd6a1"), ("pressed", "#10b981")], foreground=[("active", "#07110c"), ("pressed", "#07110c")])
         style.configure("Secondary.TButton", background=BG_SURFACE, foreground=TEXT_1, bordercolor=BORDER, focusthickness=0, padding=(14, 9))
         style.map("Secondary.TButton", background=[("active", BG_HOVER)])
         style.configure("Ghost.TButton", background=BG_BASE, foreground=TEXT_2, bordercolor=BG_BASE, focusthickness=0, padding=(10, 8))
         style.map("Ghost.TButton", background=[("active", BG_HOVER)], foreground=[("active", TEXT_1)])
         style.configure("TCheckbutton", background=BG_SURFACE, foreground=TEXT_2, focuscolor=BG_SURFACE)
         style.map("TCheckbutton", background=[("active", BG_SURFACE)], foreground=[("active", TEXT_1)])
+        style.configure("TNotebook", background=BG_BASE, borderwidth=0)
+        style.configure("TNotebook.Tab", background=BG_SURFACE, foreground=TEXT_2, padding=(14, 8), borderwidth=0)
+        style.map("TNotebook.Tab", background=[("selected", BG_ELEVATED), ("active", BG_HOVER)], foreground=[("selected", TEXT_1), ("active", TEXT_1)])
 
     def _build_ui(self) -> None:
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = tk.Frame(self.root, bg=BG_DEEP, width=148, highlightthickness=0)
+        self.sidebar = tk.Frame(self.root, bg=BG_DEEP, width=88, highlightthickness=1, highlightbackground=BORDER)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
+        self.sidebar.bind("<Enter>", self.expand_sidebar)
+        self.sidebar.bind("<Leave>", self.collapse_sidebar)
 
-        self.workspace = ttk.Frame(self.root, style="Workspace.TFrame", padding=(24, 18, 24, 12))
+        self.workspace = ttk.Frame(self.root, style="Workspace.TFrame", padding=(0, 0, 0, 0))
         self.workspace.grid(row=0, column=1, sticky="nsew")
         self.workspace.grid_columnconfigure(0, weight=1)
         self.workspace.grid_rowconfigure(1, weight=1)
 
-        self.statusbar = tk.Frame(self.root, bg=BG_DEEP, height=30)
+        self.statusbar = tk.Frame(self.root, bg=BG_DEEP, height=1)
         self.statusbar.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.statusbar.grid_propagate(False)
+        self.statusbar.grid_remove()
         tk.Label(self.statusbar, textvariable=self.status_text, bg=BG_DEEP, fg=TEXT_2, font=("Microsoft YaHei UI", 9)).pack(side="left", padx=16)
         self.status_model_label = tk.Label(self.statusbar, textvariable=self.model_status_text, bg=BG_DEEP, fg=TEXT_3, font=("Microsoft YaHei UI", 9))
         self.status_model_label.pack(side="right", padx=12)
@@ -389,25 +401,70 @@ class ResearchOSClientApp:
         self._build_workspace_shell()
         self._build_views()
         self.show_view("overview")
+        self.root.bind("<Configure>", self.handle_responsive_shell)
+
+    def handle_responsive_shell(self, _event=None) -> None:
+        if not hasattr(self, "sidebar"):
+            return
+        width = self.root.winfo_width()
+        if width and width < 760:
+            if self.sidebar.winfo_ismapped():
+                self.sidebar.grid_remove()
+        else:
+            if not self.sidebar.winfo_ismapped():
+                self.sidebar.grid(row=0, column=0, sticky="nsew")
 
     def _build_sidebar(self) -> None:
         self.sidebar.grid_rowconfigure(1, weight=1)
         self.sidebar.grid_columnconfigure(0, weight=1)
 
-        brand = tk.Frame(self.sidebar, bg=BG_DEEP)
-        brand.grid(row=0, column=0, sticky="ew", padx=12, pady=(18, 14))
-        self.status_dot = tk.Canvas(brand, width=9, height=9, bg=BG_DEEP, highlightthickness=0)
-        self.status_dot.pack(side="left", padx=(0, 8))
-        self.status_dot_id = self.status_dot.create_oval(1, 1, 8, 8, fill=WARN, outline=WARN)
-        tk.Label(brand, text="AURA", bg=BG_DEEP, fg=TEXT_1, font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
+        brand = tk.Frame(self.sidebar, bg=BG_DEEP, cursor="hand2")
+        brand.grid(row=0, column=0, sticky="ew", padx=14, pady=(22, 24))
+        brand.bind("<Enter>", self.expand_sidebar)
+        brand.bind("<Leave>", self.collapse_sidebar)
+        brand.bind("<Button-1>", lambda _event: self.show_view("overview"))
+        self.status_dot = tk.Canvas(brand, width=0, height=0, bg=BG_DEEP, highlightthickness=0)
+        self.status_dot_id = self.status_dot.create_oval(0, 0, 0, 0, fill=WARN, outline=WARN)
+        self.brand_mark = tk.Label(
+            brand,
+            text="A",
+            width=3,
+            height=2,
+            bg=ACCENT,
+            fg="#07110c",
+            font=("Microsoft YaHei UI", 14, "bold"),
+            cursor="hand2",
+        )
+        self.brand_mark.pack(side="left")
+        self.brand_mark.bind("<Button-1>", lambda _event: self.show_view("overview"))
+        self.brand_text = tk.Frame(brand, bg=BG_DEEP, cursor="hand2")
+        tk.Label(self.brand_text, text="AURA Research", bg=BG_DEEP, fg=TEXT_1, font=("Microsoft YaHei UI", 12, "bold"), cursor="hand2").pack(anchor="w")
+        tk.Label(self.brand_text, text="科研任务工作台", bg=BG_DEEP, fg=TEXT_3, font=("Microsoft YaHei UI", 8), cursor="hand2").pack(anchor="w", pady=(2, 0))
+        self.brand_text.bind("<Button-1>", lambda _event: self.show_view("overview"))
 
         self.dock = tk.Frame(self.sidebar, bg=BG_DEEP)
-        self.dock.grid(row=1, column=0, sticky="nsew", padx=10)
+        self.dock.grid(row=1, column=0, sticky="nsew", padx=14)
+        self.dock.bind("<Enter>", self.expand_sidebar)
+        self.dock.bind("<Leave>", self.collapse_sidebar)
         self.render_sidebar_nav()
 
         bottom = tk.Frame(self.sidebar, bg=BG_DEEP)
-        bottom.grid(row=2, column=0, sticky="ew", padx=10, pady=(10, 14))
-        self._small_button(bottom, "刷新状态", self.refresh_health).pack(fill="x")
+        bottom.grid(row=2, column=0, sticky="ew", padx=14, pady=(10, 20))
+        bottom.bind("<Enter>", self.expand_sidebar)
+        bottom.bind("<Leave>", self.collapse_sidebar)
+        mini = tk.Frame(bottom, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, cursor="hand2")
+        mini.pack(fill="x", ipady=10)
+        mini.bind("<Enter>", self.expand_sidebar)
+        mini.bind("<Leave>", self.collapse_sidebar)
+        mini.bind("<Button-1>", lambda _event: self.show_view("workspace_user"))
+        self.mini_project_dot = tk.Label(mini, text="●", bg=BG_SURFACE, fg=ACCENT, font=("Microsoft YaHei UI", 13, "bold"), cursor="hand2")
+        self.mini_project_dot.pack(side="left", padx=(12, 9))
+        self.mini_project_text = tk.Frame(mini, bg=BG_SURFACE, cursor="hand2")
+        tk.Label(self.mini_project_text, text="肉桂渣免疫调节", bg=BG_SURFACE, fg=TEXT_1, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2").pack(anchor="w")
+        tk.Label(self.mini_project_text, text="当前项目 · 68% 已整理", bg=BG_SURFACE, fg=TEXT_3, font=("Microsoft YaHei UI", 8), cursor="hand2").pack(anchor="w", pady=(2, 0))
+        self.mini_project_dot.bind("<Button-1>", lambda _event: self.show_view("workspace_user"))
+        self.mini_project_text.bind("<Button-1>", lambda _event: self.show_view("workspace_user"))
+        self._sync_sidebar_labels()
 
     def render_sidebar_nav(self) -> None:
         if not hasattr(self, "dock"):
@@ -415,12 +472,21 @@ class ResearchOSClientApp:
         for child in self.dock.winfo_children():
             child.destroy()
         self.nav_buttons = {}
-        for key, title in USER_NAV:
-            self._nav_button(self.dock, key, title, title)
+        user_items = [
+            ("overview", "新任务", "✦"),
+            ("workspace_user", "项目空间", "⌁"),
+            ("library_user", "文献采集", "◫"),
+            ("data", "数据分析", "▣"),
+            ("knowledge", "知识库", "◎"),
+            ("settings", "设置", "⌘"),
+        ]
+        for key, title, icon in user_items:
+            self._nav_button(self.dock, key, title, title, icon)
         if self.developer_mode.get():
             tk.Label(self.dock, text="开发者工具", bg=BG_DEEP, fg=TEXT_3, anchor="w", font=("Microsoft YaHei UI", 9)).pack(fill="x", padx=14, pady=(14, 4))
             for key, title in DEV_NAV:
-                self._nav_button(self.dock, key, title, title)
+                self._nav_button(self.dock, key, title, title, "·")
+        self._sync_sidebar_labels()
 
     def toggle_developer_mode(self) -> None:
         self.developer_mode.set(not self.developer_mode.get())
@@ -447,10 +513,80 @@ class ResearchOSClientApp:
         return tk.Button(parent, text=text, command=command, bg=BG_SURFACE, fg=TEXT_2, activebackground=BG_HOVER, activeforeground=TEXT_1, relief="flat", bd=0, padx=12, pady=9, cursor="hand2", font=("Microsoft YaHei UI", 9))
 
     def _nav_button(self, parent, key: str, title: str, subtitle: str, icon: str = "") -> None:
-        label = f"{title}"
-        button = tk.Button(parent, text=label, command=lambda: self.show_view(key), bg=BG_DEEP, fg=TEXT_2, activebackground=BG_HOVER, activeforeground=TEXT_1, relief="flat", bd=0, padx=14, pady=12, anchor="w", justify="left", cursor="hand2", font=("Microsoft YaHei UI", 10), wraplength=120)
+        label = f"{icon}  {title}" if icon else title
+        button = tk.Button(parent, text=label, command=lambda: self.show_view(key), bg=BG_DEEP, fg=TEXT_2, activebackground=BG_HOVER, activeforeground=TEXT_1, relief="flat", bd=0, padx=13, pady=13, anchor="w", justify="left", cursor="hand2", font=("Microsoft YaHei UI", 10, "bold"), wraplength=180)
         button.pack(fill="x", pady=4)
+        button._aura_icon = icon
+        button._aura_title = title
+        button.bind("<Enter>", self.expand_sidebar)
+        button.bind("<Leave>", self.collapse_sidebar)
         self.nav_buttons[key] = button
+
+    def _sync_sidebar_labels(self) -> None:
+        expanded = getattr(self, "dock_expanded", False)
+        if hasattr(self, "brand_text"):
+            if expanded:
+                self.brand_text.pack(side="left", padx=(12, 0))
+            else:
+                self.brand_text.pack_forget()
+        if hasattr(self, "mini_project_text"):
+            if expanded:
+                self.mini_project_text.pack(side="left")
+            else:
+                self.mini_project_text.pack_forget()
+        for button in getattr(self, "nav_buttons", {}).values():
+            icon = getattr(button, "_aura_icon", "")
+            title = getattr(button, "_aura_title", "")
+            button.configure(text=f"{icon}  {title}" if expanded else icon)
+
+    def animate_sidebar_width(self, target: int) -> None:
+        if getattr(self, "sidebar_target_width", None) == target and int(self.sidebar.cget("width")) == target:
+            return
+        self.sidebar_target_width = target
+        if self.sidebar_animation_after:
+            try:
+                self.root.after_cancel(self.sidebar_animation_after)
+            except Exception:
+                pass
+            self.sidebar_animation_after = ""
+        current = int(self.sidebar.cget("width"))
+        if current == target:
+            self._sync_sidebar_labels()
+            return
+        step = 18 if target > current else -18
+        next_width = current + step
+        if (step > 0 and next_width > target) or (step < 0 and next_width < target):
+            next_width = target
+        self.sidebar.configure(width=next_width)
+        if next_width != target:
+            self.sidebar_animation_after = self.root.after(16, lambda: self.animate_sidebar_width(target))
+        else:
+            self.sidebar_animation_after = ""
+            self._sync_sidebar_labels()
+
+    def expand_sidebar(self, _event=None) -> None:
+        if self.dock_expanded and int(self.sidebar.cget("width")) >= 260:
+            return
+        self.dock_expanded = True
+        self._sync_sidebar_labels()
+        if hasattr(self, "sidebar"):
+            self.animate_sidebar_width(260)
+
+    def collapse_sidebar(self, _event=None) -> None:
+        x = self.root.winfo_pointerx()
+        y = self.root.winfo_pointery()
+        target = self.root.winfo_containing(x, y)
+        widget = target
+        while widget is not None:
+            if widget is self.sidebar:
+                return
+            widget = getattr(widget, "master", None)
+        if not self.dock_expanded and int(self.sidebar.cget("width")) <= 88:
+            return
+        self.dock_expanded = False
+        self._sync_sidebar_labels()
+        if hasattr(self, "sidebar"):
+            self.animate_sidebar_width(88)
 
     def show_dock(self, _event=None) -> None:
         if self.dock_hide_after:
@@ -459,8 +595,7 @@ class ResearchOSClientApp:
             except Exception:
                 pass
             self.dock_hide_after = ""
-        self.dock_expanded = True
-        self.dock_menu.grid()
+        self.expand_sidebar()
 
     def schedule_hide_dock(self, _event=None) -> None:
         if self.dock_hide_after:
@@ -472,7 +607,9 @@ class ResearchOSClientApp:
 
     def hide_dock(self) -> None:
         self.dock_expanded = False
-        self.dock_menu.grid_remove()
+        self._sync_sidebar_labels()
+        if hasattr(self, "sidebar"):
+            self.animate_sidebar_width(88)
 
     def toggle_dock(self) -> None:
         if self.dock_expanded:
@@ -482,16 +619,25 @@ class ResearchOSClientApp:
 
     def _build_workspace_shell(self) -> None:
         header = ttk.Frame(self.workspace, style="Workspace.TFrame")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 18))
+        header.grid(row=0, column=0, sticky="ew", padx=26, pady=(18, 0))
         header.grid_columnconfigure(0, weight=1)
-        ttk.Label(header, textvariable=self.workspace_title, style="Title.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(header, textvariable=self.workspace_subtitle, style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
-        self.dual_status_pill = tk.Label(header, text="本地连接检测中", bg=BG_SURFACE, fg=TEXT_2, padx=14, pady=8, font=("Microsoft YaHei UI", 9))
-        self.dual_status_pill.grid(row=0, column=1, rowspan=2, sticky="e", padx=(10, 0))
+        self.shell_title_block = ttk.Frame(header, style="Workspace.TFrame")
+        self.shell_title_block.grid(row=0, column=0, sticky="w")
+        ttk.Label(self.shell_title_block, textvariable=self.workspace_title, style="Title.TLabel").pack(anchor="w")
+        ttk.Label(self.shell_title_block, textvariable=self.workspace_subtitle, style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+        self.dual_status_pill = tk.Label(header, text="● 本地知识库已连接", bg=BG_SURFACE, fg=TEXT_2, padx=15, pady=10, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2")
+        self.dual_status_pill.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        self.dual_status_pill.bind("<Button-1>", lambda _event: self.show_view("library_user"))
+        self.task_count_pill = tk.Label(header, text="今天 3 个任务待推进", bg=BG_SURFACE, fg=TEXT_2, padx=15, pady=10, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2")
+        self.task_count_pill.grid(row=0, column=2, sticky="e", padx=(12, 0))
+        self.task_count_pill.bind("<Button-1>", lambda _event: self.show_view("tasks_user"))
+        self.profile_pill = tk.Label(header, text="  ●  正栩", bg=BG_SURFACE, fg=TEXT_2, padx=15, pady=10, font=("Microsoft YaHei UI", 9, "bold"), cursor="hand2")
+        self.profile_pill.grid(row=0, column=3, sticky="e", padx=(12, 0))
+        self.profile_pill.bind("<Button-1>", lambda _event: self.show_view("settings"))
         self.dev_command_button = ttk.Button(header, text="开发者控制台", style="Secondary.TButton", command=lambda: self.show_view("functions"))
-        self.dev_command_button.grid(row=0, column=2, rowspan=2, sticky="e", padx=(10, 0))
+        self.dev_command_button.grid(row=1, column=2, sticky="e", padx=(10, 0), pady=(8, 0))
         self.dev_demo_button = ttk.Button(header, text="开发者演示", style="Accent.TButton", command=self.run_dual_agent_demo)
-        self.dev_demo_button.grid(row=0, column=3, rowspan=2, sticky="e", padx=(10, 0))
+        self.dev_demo_button.grid(row=1, column=3, sticky="e", padx=(10, 0), pady=(8, 0))
         if not self.developer_mode.get():
             self.dev_command_button.grid_remove()
             self.dev_demo_button.grid_remove()
@@ -534,21 +680,40 @@ class ResearchOSClientApp:
         return frame
 
     def _panel(self, parent, title: str, subtitle: str = "") -> ttk.Frame:
-        outer = ttk.Frame(parent, style="Panel.TFrame", padding=(18, 16, 18, 18))
-        ttk.Label(outer, text=title, style="PanelTitle.TLabel").pack(anchor="w")
+        outer = tk.Frame(parent, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=18, pady=16)
+        if title:
+            tk.Label(outer, text=title, bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 11, "bold")).pack(anchor="w")
         if subtitle:
-            ttk.Label(outer, text=subtitle, style="PanelMuted.TLabel", wraplength=520).pack(anchor="w", pady=(2, 10))
+            tk.Label(outer, text=subtitle, bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=620, font=(FONT_UI, 9)).pack(anchor="w", pady=(2, 10))
         else:
-            ttk.Frame(outer, style="Panel.TFrame", height=8).pack()
+            tk.Frame(outer, bg=BG_SURFACE, height=8).pack()
         return outer
 
     def _text(self, parent, height: int = 12) -> ScrolledText:
-        box = ScrolledText(parent, height=height, bg=BG_INPUT, fg=TEXT_1, insertbackground=TEXT_1, selectbackground=ACCENT_DIM, relief="flat", bd=0, padx=13, pady=13, font=("Consolas", 10), wrap="word")
+        box = ScrolledText(parent, height=height, bg=BG_INPUT, fg=TEXT_1, insertbackground=TEXT_1, selectbackground=ACCENT_DIM, relief="flat", bd=0, padx=13, pady=13, font=(FONT_MONO, 10), wrap="word")
         return box
 
     def _reading_text(self, parent, height: int = 12) -> ScrolledText:
-        box = ScrolledText(parent, height=height, bg=BG_INPUT, fg=TEXT_1, insertbackground=TEXT_1, selectbackground=ACCENT_DIM, relief="flat", bd=0, padx=16, pady=16, font=("Microsoft YaHei UI", 10), wrap="word")
+        box = ScrolledText(parent, height=height, bg=BG_INPUT, fg=TEXT_1, insertbackground=TEXT_1, selectbackground=ACCENT_DIM, relief="flat", bd=0, padx=16, pady=16, font=(FONT_UI, 10), wrap="word")
         return box
+
+    def _action_button(self, parent, text: str, command, *, kind: str = "secondary") -> tk.Button:
+        primary = kind == "primary"
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=ACCENT if primary else BG_ELEVATED,
+            fg="#07110c" if primary else TEXT_1,
+            activebackground="#2fd6a1" if primary else BG_HOVER,
+            activeforeground="#07110c" if primary else TEXT_1,
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=9,
+            cursor="hand2",
+            font=(FONT_UI, 9, "bold"),
+        )
 
     def _entry(self, parent, label: str, var: tk.StringVar) -> ttk.Entry:
         ttk.Label(parent, text=label, style="PanelMuted.TLabel").pack(anchor="w", pady=(0, 4))
@@ -621,39 +786,217 @@ class ResearchOSClientApp:
         view.grid_columnconfigure(0, weight=1)
         view.grid_rowconfigure(0, weight=1)
 
-        center = ttk.Frame(view, style="Workspace.TFrame", padding=(70, 42, 70, 30))
-        center.grid(row=0, column=0, sticky="nsew")
-        center.grid_columnconfigure(0, weight=1)
-        center.grid_rowconfigure(4, weight=1)
+        shell = tk.Frame(view, bg=BG_BASE)
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.grid_columnconfigure(0, weight=1)
+        shell.grid_rowconfigure(0, weight=1)
 
-        brand = ttk.Frame(center, style="Workspace.TFrame")
-        brand.grid(row=0, column=0, sticky="ew", pady=(30, 22))
-        ttk.Label(brand, text="今天想和 AURA 讨论什么？", style="Title.TLabel", font=("Microsoft YaHei UI", 30, "bold")).pack(anchor="center")
-        ttk.Label(brand, text="可以打招呼、提问，也可以输入文献、实验、数据或写作需求。", style="Muted.TLabel", font=("Microsoft YaHei UI", 12)).pack(anchor="center", pady=(10, 0))
+        bg = tk.Canvas(shell, bg=BG_BASE, highlightthickness=0)
+        bg.grid(row=0, column=0, sticky="nsew")
 
-        command = tk.Frame(center, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        command.grid(row=1, column=0, sticky="ew", padx=110)
-        command.grid_columnconfigure(0, weight=1)
-        ttk.Label(command, text="问 AURA", style="PanelMuted.TLabel").grid(row=0, column=0, sticky="w", padx=24, pady=(20, 4))
-        self.command_entry = ttk.Entry(command, textvariable=self.command_text, font=("Microsoft YaHei UI", 16))
-        self.command_entry.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16), ipady=13)
-        self.command_entry.bind("<Return>", lambda _event: self.start_command_task())
-        ttk.Button(command, text="发送", style="Accent.TButton", command=self.start_command_task).grid(row=1, column=1, sticky="e", padx=(0, 24), pady=(0, 16))
+        content = tk.Frame(bg, bg=BG_BASE)
+        content.grid_columnconfigure(0, weight=1)
+        bg_window = bg.create_window(0, 0, window=content, anchor="nw")
 
-        chips = ttk.Frame(command, style="Panel.TFrame")
-        chips.grid(row=2, column=0, columnspan=2, sticky="w", padx=22, pady=(0, 20))
-        for label in ["文献采集", "实验分析", "方案提取", "证据核查"]:
-            tk.Button(chips, text=label, command=lambda value=label: self.fill_command_chip(value), bg=BG_ELEVATED, fg=TEXT_2, activebackground=ACCENT_DIM, activeforeground=ACCENT, relief="flat", bd=0, padx=15, pady=8, cursor="hand2", font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(0, 8))
+        def redraw_background(_event=None) -> None:
+            width = max(bg.winfo_width(), 1)
+            height = max(bg.winfo_height(), 1)
+            size_key = (width // 24, height // 24)
+            if getattr(bg, "_aura_bg_size_key", None) == size_key:
+                return
+            bg._aura_bg_size_key = size_key
+            bg.delete("aura-bg")
+            bands = [
+                "#0f1411", "#101612", "#111713", "#121814", "#131b16",
+                "#151d18", "#17201b", "#19231d", "#1b251f", "#1d2922",
+            ]
+            band_h = max(height // len(bands), 1)
+            for idx, color in enumerate(bands):
+                bg.create_rectangle(0, idx * band_h, width, (idx + 1) * band_h + 2, fill=color, outline=color, tags="aura-bg")
+            bg.create_oval(int(width * 0.70), -120, int(width * 1.05), int(height * 0.36), fill="#173d31", outline="", tags="aura-bg")
+            bg.create_oval(-100, int(height * 0.65), int(width * 0.30), int(height * 1.16), fill="#152d25", outline="", tags="aura-bg")
+            bg.create_line(0, int(height * 0.80), width, int(height * 0.56), fill="#20352d", width=1, tags="aura-bg")
+            bg.tag_lower("aura-bg")
+            bg.itemconfigure(bg_window, width=width, height=height)
 
-        summary = tk.Frame(center, bg=BG_ELEVATED, highlightbackground=BORDER_SUBTLE, highlightthickness=1)
-        summary.grid(row=2, column=0, sticky="ew", padx=150, pady=(22, 0))
-        summary.grid_columnconfigure(0, weight=1)
-        self.home_project_summary = tk.Label(summary, text="当前项目：等待连接本地工作区", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=18, pady=12, font=("Microsoft YaHei UI", 10))
-        self.home_project_summary.grid(row=0, column=0, sticky="ew")
-        tk.Button(summary, text="进入工作区", command=lambda: self.show_view("workspace_user"), bg=BG_ELEVATED, fg=ACCENT, activebackground=BG_HOVER, activeforeground=ACCENT, relief="flat", bd=0, padx=14, pady=10, cursor="hand2", font=("Microsoft YaHei UI", 9, "bold")).grid(row=0, column=1, sticky="e")
+        bg.bind("<Configure>", redraw_background)
 
-        self.home_status_line = tk.Label(center, text="本地连接检测中 · 模型检测中", bg=BG_BASE, fg=TEXT_3, font=("Microsoft YaHei UI", 9))
-        self.home_status_line.grid(row=3, column=0, sticky="n", pady=(18, 0))
+        hero = tk.Frame(content, bg=BG_BASE)
+        hero.grid(row=0, column=0, sticky="nsew", padx=30, pady=(86, 72))
+        hero.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(0, weight=1)
+
+        headline = tk.Canvas(hero, width=980, height=68, bg=BG_BASE, highlightthickness=0)
+        headline.grid(row=0, column=0, pady=(0, 28))
+
+        def draw_headline(_event=None) -> None:
+            width_key = headline.winfo_width() // 24
+            if getattr(headline, "_aura_headline_width_key", None) == width_key:
+                return
+            headline._aura_headline_width_key = width_key
+            headline.delete("all")
+            canvas_width = max(headline.winfo_width(), 980)
+            cn_font = tkfont.Font(family="Microsoft YaHei UI", size=30, weight="bold")
+            aura_font = tkfont.Font(family="Fraunces", size=36, slant="italic", weight="bold")
+            left_text = "欢迎使用"
+            aura_text = "Aura Research"
+            right_text = "，有什么可以帮忙的？"
+            total = cn_font.measure(left_text) + aura_font.measure(aura_text) + cn_font.measure(right_text) + 22
+            x = max((canvas_width - total) // 2, 8)
+            y = 34
+            headline.create_text(x, y, text=left_text, anchor="w", fill=TEXT_1, font=cn_font)
+            x += cn_font.measure(left_text) + 10
+            aura_width = aura_font.measure(aura_text)
+            headline.create_rectangle(x + 2, y + 13, x + aura_width - 2, y + 21, fill="#173d31", outline="")
+            try:
+                headline.create_text(x, y + 1, text=aura_text, anchor="w", fill="#1b4d3b", font=aura_font, angle=-1)
+                headline.create_text(x, y, text=aura_text, anchor="w", fill=ACCENT, font=aura_font, angle=-1)
+            except tk.TclError:
+                headline.create_text(x, y + 1, text=aura_text, anchor="w", fill="#1b4d3b", font=aura_font)
+                headline.create_text(x, y, text=aura_text, anchor="w", fill=ACCENT, font=aura_font)
+            x += aura_width + 12
+            headline.create_text(x, y, text=right_text, anchor="w", fill=TEXT_1, font=cn_font)
+
+        headline.bind("<Configure>", draw_headline)
+
+        composer = tk.Frame(hero, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        composer.grid(row=1, column=0, sticky="ew", padx=150)
+        composer.grid_columnconfigure(0, weight=1)
+        self.command_entry = tk.Text(
+            composer,
+            height=3,
+            bg=BG_SURFACE,
+            fg=TEXT_1,
+            insertbackground=TEXT_1,
+            relief="flat",
+            bd=0,
+            padx=20,
+            pady=16,
+            font=("Microsoft YaHei UI", 12),
+            wrap="word",
+        )
+        self.command_entry.grid(row=0, column=0, columnspan=2, sticky="ew")
+        placeholder = "输入关键词、实验问题、文献方向或数据分析需求，例如：肉桂渣 免疫调节 文献采集"
+        self.command_entry.insert("1.0", placeholder)
+        self.command_entry.configure(fg="#9aa692")
+
+        def clear_placeholder(_event=None) -> None:
+            if self.command_entry.get("1.0", "end-1c") == placeholder:
+                self.command_entry.delete("1.0", tk.END)
+                self.command_entry.configure(fg=TEXT_1)
+
+        def restore_placeholder(_event=None) -> None:
+            if not self.command_entry.get("1.0", "end-1c").strip():
+                self.command_entry.insert("1.0", placeholder)
+                self.command_entry.configure(fg="#9aa692")
+
+        def sync_command_text() -> None:
+            value = self.command_entry.get("1.0", "end-1c")
+            self.command_text.set("" if value == placeholder else value)
+
+        def current_home_text() -> str:
+            sync_command_text()
+            return self.command_text.get().strip()
+
+        def send_from_home() -> None:
+            value = current_home_text()
+            if not value:
+                self.show_aura_toast("先输入一个科研目标或关键词")
+                return
+            self.command_entry.delete("1.0", tk.END)
+            restore_placeholder()
+            self.command_text.set("")
+            self.open_chat_with_message(value)
+
+        def home_keydown(event) -> str | None:
+            if event.keysym == "Return" and not (event.state & 0x0001):
+                send_from_home()
+                return "break"
+            return None
+
+        self.command_entry.bind("<FocusIn>", clear_placeholder)
+        self.command_entry.bind("<FocusOut>", restore_placeholder)
+        self.command_entry.bind("<KeyRelease>", lambda _event: sync_command_text())
+        self.command_entry.bind("<Return>", home_keydown)
+
+        actions = tk.Frame(composer, bg=BG_SURFACE)
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
+        actions.grid_columnconfigure(0, weight=1)
+        tool_row = tk.Frame(actions, bg=BG_SURFACE)
+        tool_row.grid(row=0, column=0, sticky="w")
+
+        def run_context_tool(default_prompt: str, with_topic) -> None:
+            value = current_home_text()
+            if value:
+                self.command_entry.delete("1.0", tk.END)
+                restore_placeholder()
+                self.command_text.set("")
+                self.open_chat_with_message(with_topic(value))
+            else:
+                fill_quick(default_prompt)
+
+        tool_actions = [
+            ("＋ 上传", self.home_upload_file),
+            ("文献", lambda: run_context_tool("请围绕当前项目关键词采集开放文献，并把结果整理进资料库。", lambda topic: f"请围绕“{topic}”采集开放文献，并把结果整理进当前项目资料库。")),
+            ("实验", lambda: run_context_tool("请根据当前项目设计下一步实验方案，包括分组、指标、方法和验证路径。", lambda topic: f"请根据“{topic}”设计下一步实验方案，包括分组、指标、方法和验证路径。")),
+            ("数据", self.home_upload_data_file),
+            ("写作", lambda: run_context_tool("请根据当前项目记忆生成一页式科研进展汇报。", lambda topic: f"请围绕“{topic}”并结合当前项目记忆生成科研写作草稿。")),
+        ]
+        for label, command in tool_actions:
+            tk.Button(tool_row, text=label, command=command, bg=BG_SURFACE, fg=TEXT_2, activebackground=BG_HOVER, activeforeground=ACCENT, relief="flat", bd=0, padx=11, pady=8, cursor="hand2", font=("Microsoft YaHei UI", 9, "bold")).pack(side="left", padx=(0, 8))
+        send = tk.Button(actions, text="→", command=send_from_home, bg=ACCENT, fg="#07110c", activebackground="#2fd6a1", activeforeground="#07110c", relief="flat", bd=0, padx=17, pady=10, cursor="hand2", font=("Microsoft YaHei UI", 15, "bold"))
+        send.grid(row=0, column=1, sticky="e")
+
+        cards = tk.Frame(hero, bg=BG_BASE)
+        cards.grid(row=2, column=0, sticky="ew", padx=150, pady=(18, 0))
+        for idx in range(4):
+            cards.grid_columnconfigure(idx, weight=1, uniform="quick")
+        quick_prompts = [
+            ("文献采集", "输入 1 到 3 个关键词，自动检索、筛选、入库。", "帮我采集肉桂渣免疫调节相关文献，并整理成项目知识库"),
+            ("实验设计", "把研究目标转成分组、指标、方法和验证路径。", "根据我的项目设计下一步 RAW264.7 免疫调节实验方案"),
+            ("数据分析", "上传表格后自动判断统计路线和可视化方案。", "分析我上传的数据表，找出差异结果并生成图表建议"),
+            ("项目复盘", "从文献、实验、数据和失败记录生成汇报。", "根据当前项目记忆生成一页式科研进展汇报"),
+        ]
+
+        def fill_quick(text: str) -> None:
+            self.command_entry.configure(fg=TEXT_1)
+            self.command_entry.delete("1.0", tk.END)
+            self.command_entry.insert("1.0", text)
+            self.command_text.set(text)
+            self.command_entry.focus_set()
+            self.show_aura_toast("已放入输入框，可继续修改后发送")
+
+        for idx, (title, desc, text) in enumerate(quick_prompts):
+            card = tk.Frame(cards, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, cursor="hand2")
+            card.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 6, 0 if idx == 3 else 6), ipady=10)
+            card.bind("<Button-1>", lambda _event, value=text: fill_quick(value))
+            title_label = tk.Label(card, text=title, bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=("Microsoft YaHei UI", 10, "bold"), cursor="hand2")
+            title_label.pack(fill="x", padx=16, pady=(12, 5))
+            desc_label = tk.Label(card, text=desc, bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=160, font=("Microsoft YaHei UI", 9), cursor="hand2")
+            desc_label.pack(fill="x", padx=16, pady=(0, 12))
+            title_label.bind("<Button-1>", lambda _event, value=text: fill_quick(value))
+            desc_label.bind("<Button-1>", lambda _event, value=text: fill_quick(value))
+
+        self.home_project_summary = tk.Label(shell, text="当前项目：等待连接本地工作区", bg=BG_BASE, fg=TEXT_3, font=("Microsoft YaHei UI", 1))
+        self.home_status_line = tk.Label(shell, text="本地连接检测中 · 模型检测中", bg=BG_BASE, fg=TEXT_3, font=("Microsoft YaHei UI", 1))
+        self.aura_toast = tk.Label(view, text="", bg=BG_SURFACE, fg=ACCENT, padx=16, pady=12, font=("Microsoft YaHei UI", 9, "bold"), highlightbackground=BORDER, highlightthickness=1)
+
+        def responsive(_event=None) -> None:
+            width = view.winfo_width()
+            if width and width < 760:
+                headline.configure(width=max(width - 36, 320))
+                cards.grid_configure(padx=18)
+                composer.grid_configure(padx=18)
+                for idx, child in enumerate(cards.winfo_children()):
+                    child.grid_configure(row=idx, column=0, sticky="ew", padx=0, pady=(0, 12))
+            else:
+                headline.configure(width=980)
+                cards.grid_configure(padx=150)
+                composer.grid_configure(padx=150)
+                for idx, child in enumerate(cards.winfo_children()):
+                    child.grid_configure(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 6, 0 if idx == 3 else 6), pady=0)
+
+        view.bind("<Configure>", responsive)
 
     def _build_workspace_user(self) -> None:
         view = self._view("workspace_user", "工作区", "当前项目、项目记忆和下一步建议。")
@@ -1367,7 +1710,13 @@ class ResearchOSClientApp:
                     raise RuntimeError(pretty(body))
                 return body
 
-            self.run_async(execute, lambda _body: (self.status_text.set("项目已彻底删除"), self.load_projects(), self.show_view("overview")), self._show_error)
+            def deleted(_body):
+                self.forget_project_selection(project_id)
+                self.status_text.set("项目已彻底删除")
+                self.load_projects()
+                self.show_view("overview")
+
+            self.run_async(execute, deleted, self._show_error)
 
         self.run_async(task, done, self._show_error)
 
@@ -1695,6 +2044,29 @@ class ResearchOSClientApp:
 
     def fill_command_chip(self, value: str) -> None:
         self.open_chat_with_message(CAPABILITY_PROMPTS.get(value, f"请帮我进行{value}。"))
+
+    def show_aura_toast(self, message: str) -> None:
+        toast = getattr(self, "aura_toast", None)
+        if toast is None:
+            return
+        toast.configure(text=message)
+        toast.place(relx=0.5, rely=1.0, anchor="s", y=-28)
+        if getattr(self, "aura_toast_after", ""):
+            try:
+                self.root.after_cancel(self.aura_toast_after)
+            except Exception:
+                pass
+        self.aura_toast_after = self.root.after(1600, toast.place_forget)
+
+    def home_upload_file(self) -> None:
+        self.set_project_var(self.agent_project, self.default_project_id())
+        self.show_view("agent")
+        self.chat_upload_file()
+
+    def home_upload_data_file(self) -> None:
+        self.set_project_var(self.data_project, self.default_project_id())
+        if self.quick_data_upload():
+            self.show_aura_toast("数据文件已交给资料库解析，可继续向 AURA 提问")
 
     def normalize_intent_guard_text(self, message: str) -> str:
         text = clean(message).lower()
@@ -2077,53 +2449,80 @@ class ResearchOSClientApp:
 
     def _build_agent(self) -> None:
         view = self._view("agent", "问 AURA", "像聊天一样提出问题；需要启动任务时，AURA 会先说明并等待确认或返回任务卡片。")
-        view.grid_columnconfigure(0, weight=1)
-        view.grid_columnconfigure(1, weight=0)
+        view.grid_columnconfigure(0, weight=5)
+        view.grid_columnconfigure(1, weight=2)
         view.grid_rowconfigure(0, weight=1)
 
-        chat = self._panel(view, "", "")
-        chat.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        top = ttk.Frame(chat, style="Panel.TFrame")
-        top.pack(fill="x", pady=(0, 10))
-        ttk.Label(top, text="当前项目", style="PanelMuted.TLabel").pack(side="left", padx=(0, 8))
+        chat = tk.Frame(view, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=18, pady=16)
+        chat.grid(row=0, column=0, sticky="nsew", padx=(26, 10), pady=(14, 24))
+        chat.grid_columnconfigure(0, weight=1)
+        chat.grid_rowconfigure(2, weight=1)
+
+        top = tk.Frame(chat, bg=BG_SURFACE)
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        top.grid_columnconfigure(2, weight=1)
+        tk.Label(top, text="AURA Agent", bg=BG_SURFACE, fg=TEXT_1, font=(FONT_UI, 15, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(top, text="项目", bg=BG_SURFACE, fg=TEXT_3, font=(FONT_UI, 9)).grid(row=0, column=1, sticky="w", padx=(18, 8))
         self.agent_project_box = ttk.Combobox(top, textvariable=self.agent_project, values=[], state="readonly", width=28)
-        self.agent_project_box.pack(side="left")
-        ttk.Button(top, text="查看上下文", style="Secondary.TButton", command=self.toggle_agent_context_panel).pack(side="right")
-        ttk.Button(top, text="清空", style="Secondary.TButton", command=self.clear_agent_chat).pack(side="right", padx=(0, 8))
+        self.agent_project_box.grid(row=0, column=2, sticky="w")
+        self._action_button(top, "上下文", self.toggle_agent_context_panel).grid(row=0, column=3, sticky="e", padx=(8, 0))
+        self._action_button(top, "清空", self.clear_agent_chat).grid(row=0, column=4, sticky="e", padx=(8, 0))
+
+        shortcut = tk.Frame(chat, bg=BG_SURFACE)
+        shortcut.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        shortcut_prompts = [
+            ("采文献", "请围绕当前项目关键词采集开放文献，并整理证据链。"),
+            ("设计实验", "请根据当前项目设计下一步实验方案。"),
+            ("查资料库", "请检索当前项目资料库并总结可用证据。"),
+            ("写进展", "请根据当前项目记忆生成科研进展汇报。"),
+        ]
+        for label, prompt in shortcut_prompts:
+            self._action_button(shortcut, label, lambda value=prompt: self.insert_agent_prompt(value)).pack(side="left", padx=(0, 8))
 
         self.agent_transcript = self._reading_text(chat, 21)
-        self.agent_transcript.pack(fill="both", expand=True, pady=(0, 12))
+        self.agent_transcript.grid(row=2, column=0, sticky="nsew", pady=(0, 12))
         self.agent_transcript.insert("1.0", "AURA 已准备好。\n\n你可以直接打招呼、提问，或让 AURA 帮你采集文献、分析数据、整理实验记录。\n\n")
 
-        self.agent_inline_actions = ttk.Frame(chat, style="Panel.TFrame")
-        self.agent_inline_actions.pack(fill="x", pady=(0, 8))
+        self.agent_inline_actions = tk.Frame(chat, bg=BG_SURFACE)
+        self.agent_inline_actions.grid(row=3, column=0, sticky="ew", pady=(0, 8))
 
-        composer = ttk.Frame(chat, style="Panel.TFrame")
-        composer.pack(fill="x")
+        composer = tk.Frame(chat, bg=BG_INPUT, highlightbackground=BORDER, highlightthickness=1, padx=10, pady=10)
+        composer.grid(row=4, column=0, sticky="ew")
         composer.grid_columnconfigure(0, weight=1)
         self.agent_message = self._reading_text(composer, 4)
         self.agent_message.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.agent_message.bind("<Control-Return>", lambda _event: self.send_agent_message())
-        ttk.Button(composer, text="上传", style="Secondary.TButton", command=self.chat_upload_file).grid(row=0, column=1, sticky="se", padx=(0, 8))
-        ttk.Button(composer, text="发送", style="Accent.TButton", command=self.send_agent_message).grid(row=0, column=2, sticky="se")
+        self._action_button(composer, "上传", self.chat_upload_file).grid(row=0, column=1, sticky="se", padx=(0, 8))
+        self._action_button(composer, "发送", self.send_agent_message, kind="primary").grid(row=0, column=2, sticky="se")
 
-        right = self._panel(view, "上下文", "这里只显示本次回答使用的来源、任务和项目摘要；普通聊天默认隐藏。")
-        right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        right = tk.Frame(view, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=16, pady=16)
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 26), pady=(14, 24))
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(3, weight=1)
+        tk.Label(right, text="上下文", bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 13, "bold")).grid(row=0, column=0, sticky="ew")
+        tk.Label(right, text="本次回答使用的来源、任务和项目摘要。", bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=320, font=(FONT_UI, 9)).grid(row=1, column=0, sticky="ew", pady=(2, 12))
         self.agent_context_panel = right
         self.agent_actions_frame = tk.Frame(right, bg=BG_SURFACE)
-        self.agent_actions_frame.pack(fill="x", pady=(0, 10))
+        self.agent_actions_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         context_state = tk.Frame(right, bg=BG_SURFACE)
-        context_state.pack(fill="x", pady=(0, 10))
-        self.agent_workspace_label = tk.Label(context_state, text="项目：未选择", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=("Microsoft YaHei UI", 9))
+        context_state.grid(row=3, column=0, sticky="new", pady=(0, 10))
+        self.agent_workspace_label = tk.Label(context_state, text="项目：未选择", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=(FONT_UI, 9))
         self.agent_workspace_label.pack(fill="x", pady=(0, 6))
-        self.agent_evidence_label = tk.Label(context_state, text="资料：等待检索", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=("Microsoft YaHei UI", 9))
+        self.agent_evidence_label = tk.Label(context_state, text="资料：等待检索", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=(FONT_UI, 9))
         self.agent_evidence_label.pack(fill="x", pady=(0, 6))
-        self.agent_task_label = tk.Label(context_state, text="任务：暂无", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=("Microsoft YaHei UI", 9))
+        self.agent_task_label = tk.Label(context_state, text="任务：暂无", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=(FONT_UI, 9))
         self.agent_task_label.pack(fill="x")
         self.agent_detail = self._reading_text(right, 18)
-        self.agent_detail.pack(fill="both", expand=True)
+        self.agent_detail.grid(row=4, column=0, sticky="nsew")
         self.agent_answer = self.agent_detail
         self.agent_context_panel.grid_remove()
+
+    def insert_agent_prompt(self, text: str) -> None:
+        if not hasattr(self, "agent_message"):
+            return
+        self.agent_message.delete("1.0", tk.END)
+        self.agent_message.insert("1.0", text)
+        self.agent_message.focus_set()
 
     def _build_research_feed(self) -> None:
         view = self._view("feed", "Research Feed", "Agent 主动观察当前项目后的建议、缺口和待处理文献。")
@@ -2255,7 +2654,8 @@ class ResearchOSClientApp:
         self.api_response.pack(fill="both", expand=True)
 
     def show_view(self, key: str) -> None:
-        if not self.developer_mode.get() and key not in {item[0] for item in USER_NAV}:
+        aura_home_allowed = {item[0] for item in USER_NAV} | {"data", "knowledge"}
+        if not self.developer_mode.get() and key not in aura_home_allowed:
             key = "settings"
         for name, frame in self.views.items():
             frame.grid() if name == key else frame.grid_remove()
@@ -2270,6 +2670,11 @@ class ResearchOSClientApp:
         frame = self.views[key]
         self.workspace_title.set(getattr(frame, "_view_title"))
         self.workspace_subtitle.set(getattr(frame, "_view_subtitle"))
+        if hasattr(self, "shell_title_block"):
+            if key == "overview":
+                self.shell_title_block.grid_remove()
+            else:
+                self.shell_title_block.grid()
         if key == "feed":
             self.load_agent_inbox()
         if key == "workspace_user":
@@ -2475,6 +2880,32 @@ class ResearchOSClientApp:
         if label:
             var.set(label)
 
+    def forget_project_selection(self, project_id: str) -> None:
+        project_id = clean(project_id)
+        if not project_id:
+            return
+        if clean(self.client_cache.get("last_project_id")) == project_id:
+            self.client_cache["last_project_id"] = ""
+            self.save_client_cache()
+        for var_name in [
+            "project_choice",
+            "lit_project",
+            "file_project",
+            "data_project",
+            "exp_project",
+            "sample_project",
+            "memory_project",
+            "rag_project",
+            "skill_project",
+            "agent_project",
+            "task_project",
+        ]:
+            if not hasattr(self, var_name):
+                continue
+            var = getattr(self, var_name)
+            if self.current_project_id(var) == project_id:
+                var.set("")
+
     def activate_project(self, project_id: str, *, persist: bool = True) -> None:
         project_id = clean(project_id)
         if not project_id:
@@ -2552,6 +2983,9 @@ class ResearchOSClientApp:
         preferred_id = clean(self.client_cache.get("last_project_id"))
         if preferred_id not in self.project_id_to_label:
             preferred_id = clean(active_projects[0].get("id")) if active_projects else ""
+            if not preferred_id and clean(self.client_cache.get("last_project_id")):
+                self.client_cache["last_project_id"] = ""
+                self.save_client_cache()
         for var in [self.project_choice, self.lit_project, self.file_project, self.data_project, self.exp_project, self.sample_project, self.memory_project, self.rag_project, self.skill_project, self.agent_project, self.task_project]:
             if not labels:
                 var.set("")
@@ -3181,19 +3615,21 @@ class ResearchOSClientApp:
             return
         os.startfile(str(Path(path_value)))
 
-    def quick_pdf_import(self) -> None:
+    def quick_pdf_import(self) -> bool:
         project_id = self.current_project_id(self.rag_project) or self.current_project_id(self.file_project) or self.default_project_id()
         path = filedialog.askopenfilename(title="添加文献 PDF", filetypes=[("PDF", "*.pdf"), ("All files", "*.*")])
         if not path:
-            return
+            return False
         self._register_file_path(Path(path), project_id, category="paper")
+        return True
 
-    def quick_data_upload(self) -> None:
+    def quick_data_upload(self) -> bool:
         project_id = self.current_project_id(self.data_project) or self.current_project_id(self.file_project) or self.default_project_id()
         path = filedialog.askopenfilename(title="上传科研资料", filetypes=[("Research files", "*.csv *.tsv *.xlsx *.xls *.txt *.docx *.doc *.pdf *.png *.jpg *.jpeg *.tif *.tiff"), ("All files", "*.*")])
         if not path:
-            return
+            return False
         self._register_file_path(Path(path), project_id, category="instrument export")
+        return True
 
     def _register_file_path(self, file_path: Path, project_id: str, category: str = "") -> None:
         if not project_id or not file_path.exists():
@@ -3750,9 +4186,8 @@ class ResearchOSClientApp:
 
     def update_dual_status(self, text: str, color: str = TEXT_2) -> None:
         if hasattr(self, "dual_status_pill"):
-            if not self.developer_mode.get() and "Dual Agent" in text:
-                text = "Agent 已就绪"
-            self.dual_status_pill.configure(text=text, fg=color)
+            label = "● 本地知识库已连接" if "已连接" in text or "就绪" in text else "● 本地知识库待连接"
+            self.dual_status_pill.configure(text=label, fg=color)
 
     def summarize_dual_agent_response(self, body: dict) -> str:
         result = body.get("execution_result") or {}

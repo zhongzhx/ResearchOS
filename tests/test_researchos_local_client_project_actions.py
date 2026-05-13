@@ -34,6 +34,17 @@ class FakeStatus:
         self.value = value
 
 
+class FakeVar:
+    def __init__(self, value: str = "") -> None:
+        self.value = value
+
+    def get(self) -> str:
+        return self.value
+
+    def set(self, value: str) -> None:
+        self.value = value
+
+
 class FakeApi:
     def __init__(self, responses: list[tuple[int, dict]]) -> None:
         self.responses = list(responses)
@@ -49,6 +60,8 @@ class LocalClientProjectActionTests(unittest.TestCase):
         app = object.__new__(client.ResearchOSClientApp)
         app.api = api
         app.status_text = FakeStatus()
+        app.client_cache = {"last_project_id": "project id/with space"}
+        app.saved_cache = False
         app.default_project_id = lambda: "project id/with space"
         app._show_error = lambda message: (_ for _ in ()).throw(AssertionError(message))
         app._deletion_plan_text = lambda plan: f"plan for {plan.get('scope')}"
@@ -58,6 +71,7 @@ class LocalClientProjectActionTests(unittest.TestCase):
         app.load_workspace_summary = lambda: setattr(app, "load_workspace_summary_called", app.load_workspace_summary_called + 1)
         app.load_projects = lambda: setattr(app, "load_projects_called", app.load_projects_called + 1)
         app.show_view = lambda name: setattr(app, "show_view_called", name)
+        app.save_client_cache = lambda: setattr(app, "saved_cache", True)
         app.run_async = lambda func, on_success=None, on_error=None: on_success(func()) if on_success else func()
         return app
 
@@ -102,6 +116,39 @@ class LocalClientProjectActionTests(unittest.TestCase):
         callbacks[0]()
 
         self.assertEqual(errors, ["worker boom"])
+
+    def test_render_projects_clears_stale_deleted_project_cache_when_no_projects_remain(self) -> None:
+        client = load_client_module()
+        app = object.__new__(client.ResearchOSClientApp)
+        app.client_cache = {"last_project_id": "deleted-project"}
+        app.saved_cache = False
+        app.status_text = FakeStatus()
+        app.project_cache = []
+        app.project_label_to_id = {}
+        app.project_id_to_label = {}
+        app._project_syncing = False
+        app.is_client_hidden = lambda *_args: False
+        app.save_client_cache = lambda: setattr(app, "saved_cache", True)
+        for name in [
+            "project_choice",
+            "lit_project",
+            "file_project",
+            "data_project",
+            "exp_project",
+            "sample_project",
+            "memory_project",
+            "rag_project",
+            "skill_project",
+            "agent_project",
+            "task_project",
+        ]:
+            setattr(app, name, FakeVar("deleted-project"))
+
+        client.ResearchOSClientApp.render_projects(app, [])
+
+        self.assertEqual(app.client_cache["last_project_id"], "")
+        self.assertTrue(app.saved_cache)
+        self.assertEqual(app.project_choice.get(), "")
 
     def test_clear_workspace_memory_posts_memory_scope_after_confirmation(self) -> None:
         client = load_client_module()
@@ -158,6 +205,8 @@ class LocalClientProjectActionTests(unittest.TestCase):
         self.assertIn("输入：确定", prompts[0])
         self.assertNotIn(phrase, prompts[0])
         self.assertEqual(app.status_text.value, "项目已彻底删除")
+        self.assertEqual(app.client_cache["last_project_id"], "")
+        self.assertTrue(app.saved_cache)
         self.assertEqual(app.load_projects_called, 1)
         self.assertEqual(app.show_view_called, "overview")
 

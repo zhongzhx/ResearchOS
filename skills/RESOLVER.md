@@ -33,24 +33,18 @@ Trigger phrases:
 - 文献采集
 - 搜索文献
 - 下载论文
+- 下载文献
+- 论文采集
 - keyword harvest
 - literature harvest
+- download literature
+- paper search
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - compliant-literature-access
 - extract-first-article-keywords
 - build-user-research-kb
-Brain responsibilities:
-- define search scope
-- check compliance requirements
-- validate article evidence
-- update Research Brain and Context Index
-- decide skill crystallization
-Execution responsibilities:
-- run compliant literature access
-- extract article keywords
-- build local KB
 Required inputs:
 - keywords
 - project_id
@@ -67,8 +61,24 @@ Promotion targets:
 - claims
 - project memory
 - context index
-Auto-call policy: medium risk; small compliant access can auto-run, large harvest requires task-level user approval.
+Allowed tools:
+- file_reader
+- file_writer
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- define search scope
+- check compliance requirements
+- validate article evidence
+- update Research Brain and Context Index
+- decide skill crystallization
+Execution responsibilities:
+- run compliant access
+- extract article keywords
+- build local KB
 Skill path:
 skills/researchos_skill_library/02_literature_browser_ingestion/compliant-literature-access/SKILL.md
 Fallback:
@@ -78,19 +88,15 @@ skills/researchos_skill_library/02_literature_browser_ingestion/keyword-research
 Intent: browser_research_learning
 Trigger phrases:
 - 浏览器学习
+- 网页学习
+- 学习这个网页
+- 浏览网页
 - browser learning
 - learn this website
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - browser-research-learning
-Brain responsibilities:
-- request authorization
-- downgrade confidence
-- decide whether notes enter memory
-Execution responsibilities:
-- only visit authorized pages
-- record browser learning evidence
 Required inputs:
 - url
 - user_authorization
@@ -99,33 +105,43 @@ Expected outputs:
 Validation rules:
 - requires user authorization
 - no CAPTCHA, MFA, SSO, paywall, or anti-bot bypass
-- browser records are browser_learning evidence, not peer-reviewed evidence
+- browser records are not peer-reviewed evidence
 Promotion targets:
 - browser_learning evidence
 - project memory
 - low-confidence notes
-Auto-call policy: never auto-call without explicit user authorization.
+Allowed tools:
+- context_lookup
+Risk level: high
 Requires user authorization: true
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- request authorization
+- downgrade confidence
+- decide whether notes enter memory
+Execution responsibilities:
+- only visit authorized pages
+- record browser learning evidence
 Skill path:
 skills/researchos_skill_library/02_literature_browser_ingestion/browser-research-learning/SKILL.md
 Fallback:
+
 
 ## research_route_planning
 Intent: research_route_planning
 Trigger phrases:
 - 规划研究路线
-- research route
 - 项目路线
+- 研究路线规划
+- research route
+- research planning
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - plan-research-route
 - ingest-research-evidence
-Brain responsibilities:
-- define project route
-- write decisions after review
-Execution responsibilities:
-- run route planning and evidence ingest skills
 Required inputs:
 - project_context
 Expected outputs:
@@ -138,8 +154,18 @@ Promotion targets:
 - project memory
 - decisions
 - workflows
-Auto-call policy: allowed when context is local and low risk.
+Allowed tools:
+- context_lookup
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- define project route
+- write decisions after review
+Execution responsibilities:
+- run route planning and evidence ingest skills
 Skill path:
 skills/researchos_skill_library/03_research_design_protocol/plan-research-route/SKILL.md
 Fallback:
@@ -149,6 +175,8 @@ skills/researchos_skill_library/01_core_runtime_memory/ingest-research-evidence/
 Intent: protocol_to_sop
 Trigger phrases:
 - Methods 转 SOP
+- 方法转 SOP
+- 实验步骤转 SOP
 - method to SOP
 - protocol to sop
 - 生成 SOP
@@ -157,12 +185,6 @@ Executor: execution_agent
 Execution skills:
 - protocol-extraction
 - sop-generation
-Brain responsibilities:
-- validate protocol provenance
-- decide if SOP is usable
-Execution responsibilities:
-- extract protocol
-- generate SOP
 Required inputs:
 - method_text
 Expected outputs:
@@ -176,8 +198,19 @@ Promotion targets:
 - protocols
 - experiments
 - decisions
-Auto-call policy: allowed for draft SOP only.
+Allowed tools:
+- file_reader
+- report_writer
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- validate protocol provenance
+- decide if SOP is usable
+Execution responsibilities:
+- extract protocol then generate SOP
 Skill path:
 skills/researchos_skill_library/03_research_design_protocol/protocol-extraction/SKILL.md
 Fallback:
@@ -188,15 +221,13 @@ Intent: experiment_design
 Trigger phrases:
 - 实验设计
 - 实验分组
+- 设计实验
 - experiment design
+- design experiment
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - design-experiment-matrix
-Brain responsibilities:
-- ensure design matches project context
-Execution responsibilities:
-- build experiment matrix
 Required inputs:
 - objective
 - constraints
@@ -210,32 +241,36 @@ Promotion targets:
 - experiments
 - protocols
 - decisions
-Auto-call policy: allowed for draft plans.
+Allowed tools:
+- report_writer
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- ensure design matches project context
+Execution responsibilities:
+- build experiment matrix
 Skill path:
 skills/researchos_skill_library/03_research_design_protocol/design-experiment-matrix/SKILL.md
 Fallback:
-skills/researchos_skill_library/03_research_design_protocol/plan-research-route/SKILL.md
+
 
 ## data_analysis_to_narrative
 Intent: data_analysis_to_narrative
 Trigger phrases:
 - 分析 CSV 并写结果段
 - 分析数据写结果
+- CSV 结果段
 - data analysis narrative
+- parse csv and write results
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - parse-scientific-data
 - analyze-experiment-results
 - result-narrative
-Brain responsibilities:
-- validate claims and confidence
-- promote supported outputs
-Execution responsibilities:
-- parse data
-- analyze results
-- write narrative
 Required inputs:
 - data_file
 Expected outputs:
@@ -251,8 +286,22 @@ Promotion targets:
 - claims
 - decisions
 - reports
-Auto-call policy: allowed for local files; never modify raw data.
+Allowed tools:
+- data_parser
+- csv_writer
+- report_writer
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- validate claims and confidence
+- promote supported outputs
+Execution responsibilities:
+- parse data
+- analyze results
+- write narrative
 Skill path:
 skills/researchos_skill_library/04_data_analysis_writing_review/parse-scientific-data/SKILL.md
 Fallback:
@@ -262,19 +311,15 @@ skills/researchos_skill_library/04_data_analysis_writing_review/analyze-experime
 Intent: failure_recovery
 Trigger phrases:
 - 实验失败复盘
-- failure recovery
+- 失败复盘
 - 失败记录
+- failure recovery
+- diagnose bottleneck
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - failure-log
 - diagnose-research-bottleneck
-Brain responsibilities:
-- write failure memory
-- decide whether reusable fix exists
-Execution responsibilities:
-- structure failure log
-- diagnose bottleneck
 Required inputs:
 - failure_description
 Expected outputs:
@@ -287,8 +332,18 @@ Promotion targets:
 - failures
 - decisions
 - pending skills if reusable fix exists
-Auto-call policy: allowed.
+Allowed tools:
+- report_writer
+Risk level: low
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- write failure memory
+- decide whether reusable fix exists
+Execution responsibilities:
+- structure failure log and diagnosis
 Skill path:
 skills/researchos_skill_library/04_data_analysis_writing_review/failure-log/SKILL.md
 Fallback:
@@ -298,19 +353,15 @@ skills/researchos_skill_library/04_data_analysis_writing_review/diagnose-researc
 Intent: writing_review
 Trigger phrases:
 - 模拟审稿人批评
+- 审稿人批评
 - peer review
 - review my draft
+- 论文审稿
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - result-narrative
 - peer-review-simulation
-Brain responsibilities:
-- separate critique from evidence
-- store unresolved issues
-Execution responsibilities:
-- write narrative
-- produce review critique
 Required inputs:
 - draft_or_result_summary
 Expected outputs:
@@ -323,8 +374,18 @@ Promotion targets:
 - reports
 - decisions
 - unresolved issues
-Auto-call policy: allowed, but output is not factual evidence.
+Allowed tools:
+- report_writer
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- separate critique from evidence
+- store unresolved issues
+Execution responsibilities:
+- write narrative and critique
 Skill path:
 skills/researchos_skill_library/04_data_analysis_writing_review/result-narrative/SKILL.md
 Fallback:
@@ -336,16 +397,12 @@ Trigger phrases:
 - 周报
 - weekly report
 - weekly digest
+- 项目周报
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - weekly-research-report
 - weekly-research-digest
-Brain responsibilities:
-- confirm memory updates
-- track next actions
-Execution responsibilities:
-- generate report and digest
 Required inputs:
 - project_id
 Expected outputs:
@@ -358,8 +415,18 @@ Promotion targets:
 - reports
 - project memory
 - next actions
-Auto-call policy: allowed for draft reports.
+Allowed tools:
+- report_writer
+Risk level: medium
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- confirm memory updates
+- track next actions
+Execution responsibilities:
+- generate report and digest
 Skill path:
 skills/researchos_skill_library/04_data_analysis_writing_review/weekly-research-report/SKILL.md
 Fallback:
@@ -371,15 +438,12 @@ Trigger phrases:
 - 提取实体
 - extract entities
 - 靶点模型方法
+- 实体抽取
 Planner: brain_agent
 Executor: execution_agent
 Execution skills:
 - extract-domain-entities
 - ingest-research-evidence
-Brain responsibilities:
-- promote to graph and low-risk memory
-Execution responsibilities:
-- extract entities and evidence
 Required inputs:
 - text
 Expected outputs:
@@ -392,8 +456,17 @@ Promotion targets:
 - graph
 - claims
 - project memory
-Auto-call policy: allowed.
+Allowed tools:
+- file_reader
+Risk level: low
 Requires user authorization: false
+Control skills:
+- pre_dispatch: skill-router-orchestrator, context-compiler-maintenance
+- post_execution: skill-output-validator, evidence-promotion
+Brain responsibilities:
+- promote to graph and low-risk memory
+Execution responsibilities:
+- extract entities and evidence
 Skill path:
 skills/researchos_skill_library/03_research_design_protocol/extract-domain-entities/SKILL.md
 Fallback:

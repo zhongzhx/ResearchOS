@@ -21,6 +21,7 @@ from typing import Any
 from researchos_agent_prompt import compose_researchos_prompt, normalize_prompt_policy
 import researchos_prompt_router as prompt_router
 import research_context_compiler
+import rag_retrieval_service
 import research_operating_loop
 import research_watcher
 import research_memory_canonical as canonical_memory
@@ -496,6 +497,22 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
             FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS memory_backend_registry (
+            registry_id TEXT PRIMARY KEY,
+            memory_class TEXT NOT NULL,
+            backend_name TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            source_of_truth INTEGER NOT NULL DEFAULT 0,
+            derived_from TEXT,
+            sync_policy TEXT NOT NULL,
+            last_sync_time TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(memory_class, backend_name)
         );
 
         CREATE TABLE IF NOT EXISTS research_files (
@@ -1448,6 +1465,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_ros_chat_messages_session ON chat_messages(session_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_ros_internal_context_project ON internal_context_events(project_id, session_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_ros_prompt_assembly_project ON prompt_assembly_logs(project_id, session_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_ros_memory_backend_registry_class ON memory_backend_registry(memory_class, source_of_truth, status);
         CREATE INDEX IF NOT EXISTS idx_ros_files_checksum ON research_files(checksum);
         CREATE INDEX IF NOT EXISTS idx_ros_memory_project ON memory_entities(project_id, entity_type, trust_level);
         CREATE INDEX IF NOT EXISTS idx_ros_provenance_memory ON provenance_records(memory_item_id);
@@ -1495,6 +1513,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     bootstrap_core_skill_registry(conn)
     seed_default_skill_prompts(conn)
     bootstrap_tool_capability_registry(conn)
+    bootstrap_memory_backend_registry(conn)
     bootstrap_system_agent_memory(conn)
 
 
@@ -1655,6 +1674,19 @@ def ensure_schema_compat(conn: sqlite3.Connection) -> None:
             "content": "TEXT",
             "metadata_json": "TEXT",
             "visible_to_user": "INTEGER NOT NULL DEFAULT 0",
+            "created_at": "TEXT",
+            "updated_at": "TEXT",
+        },
+        "memory_backend_registry": {
+            "memory_class": "TEXT",
+            "backend_name": "TEXT",
+            "owner": "TEXT",
+            "source_of_truth": "INTEGER NOT NULL DEFAULT 0",
+            "derived_from": "TEXT",
+            "sync_policy": "TEXT",
+            "last_sync_time": "TEXT",
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "notes": "TEXT",
             "created_at": "TEXT",
             "updated_at": "TEXT",
         },
@@ -1934,6 +1966,59 @@ def bootstrap_tool_capability_registry(conn: sqlite3.Connection) -> None:
                 capability["source_path"],
                 capability["description"],
                 capability["status"],
+                timestamp,
+                timestamp,
+            ),
+        )
+    conn.commit()
+
+
+PRIMARY_MEMORY_BACKEND = "research_group_os.sqlite"
+DEFAULT_MEMORY_BACKEND_REGISTRY: list[dict[str, str | int]] = [
+    {"memory_class": "projects", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical project records, display names, aliases, lifecycle state, and project-local paths."},
+    {"memory_class": "tasks", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical agent_tasks, literature_search_tasks, literature_ingest_items, skill_runs, and execution_memory state."},
+    {"memory_class": "chat", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical user-visible chat_sessions and chat_messages. Internal events live outside user-visible chat history."},
+    {"memory_class": "agent_memory_entries", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical project and system memory entries used by the context compiler."},
+    {"memory_class": "references", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical literature metadata and access state."},
+    {"memory_class": "reference_chunks", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical chunked literature text for project RAG."},
+    {"memory_class": "knowledge_base_entries", "backend_name": PRIMARY_MEMORY_BACKEND, "owner": "research_os_mvp", "source_of_truth": 1, "derived_from": "", "sync_policy": "authoritative_write_read", "notes": "Canonical normalized project KB entries derived from references, chunks, and reviewed research artifacts."},
+    {"memory_class": "agent_memory_compat", "backend_name": "agent_memory.sqlite", "owner": "agent_memory.database", "source_of_truth": 0, "derived_from": PRIMARY_MEMORY_BACKEND, "sync_policy": "compat_index_optional", "notes": "Compatibility ledger or dedicated index. It must not override canonical records from research_group_os.sqlite."},
+    {"memory_class": "lab_rag_legacy", "backend_name": "lab_agent_mvp.sqlite", "owner": "lab_agent_features", "source_of_truth": 0, "derived_from": f"{PRIMARY_MEMORY_BACKEND}; legacy import source", "sync_policy": "legacy_import_optional", "notes": "Old lab RAG, digest, and failure-record index. It can import into the main DB but must not be the sole answer source."},
+    {"memory_class": "managed_memory_skill_files", "backend_name": "manage-agent-memory folder", "owner": "manage-agent-memory", "source_of_truth": 0, "derived_from": PRIMARY_MEMORY_BACKEND, "sync_policy": "artifact_export_optional", "notes": "Skill-local memory files and compact shards are execution artifacts, not canonical project memory."},
+    {"memory_class": "brain_markdown_repo", "backend_name": "backend/researchos/brain", "owner": "brain_agent", "source_of_truth": 0, "derived_from": PRIMARY_MEMORY_BACKEND, "sync_policy": "human_reviewable_export", "notes": "Markdown Brain Repo is a readable export and long-term review view. It does not overwrite canonical main DB rows."},
+]
+
+
+def bootstrap_memory_backend_registry(conn: sqlite3.Connection) -> None:
+    timestamp = now()
+    for row in DEFAULT_MEMORY_BACKEND_REGISTRY:
+        registry_id = stable_id("memory_backend_registry", row["memory_class"], row["backend_name"], length=24)
+        conn.execute(
+            """
+            INSERT INTO memory_backend_registry(
+              registry_id, memory_class, backend_name, owner, source_of_truth, derived_from,
+              sync_policy, last_sync_time, status, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            ON CONFLICT(memory_class, backend_name) DO UPDATE SET
+              owner=excluded.owner,
+              source_of_truth=excluded.source_of_truth,
+              derived_from=excluded.derived_from,
+              sync_policy=excluded.sync_policy,
+              status=excluded.status,
+              notes=excluded.notes,
+              updated_at=excluded.updated_at
+            """,
+            (
+                registry_id,
+                clean(row["memory_class"]),
+                clean(row["backend_name"]),
+                clean(row["owner"]),
+                int(row["source_of_truth"]),
+                clean(row["derived_from"]),
+                clean(row["sync_policy"]),
+                timestamp if int(row["source_of_truth"]) else "",
+                clean(row["notes"]),
                 timestamp,
                 timestamp,
             ),
@@ -2428,6 +2513,7 @@ PROJECT_CLEAR_SCOPES: dict[str, list[str]] = {
     "tasks": ["literature_search_tasks", "agent_tasks", "skill_runs", "execution_memory", "agent_inbox_items", "agent_watch_state"],
     "data_context": ["data_contexts", "file_sample_links"],
 }
+PROJECT_RESEARCH_RECORD_TABLES = ["experiments", "samples", "protocols", "conclusions", "decisions"]
 
 
 def _scope_tables(scope: str) -> list[str]:
@@ -2436,6 +2522,7 @@ def _scope_tables(scope: str) -> list[str]:
         tables: list[str] = []
         for key in ["uploads", "downloaded_pdfs", "kb", "memory", "tasks", "data_context"]:
             tables.extend(PROJECT_CLEAR_SCOPES[key])
+        tables.extend(PROJECT_RESEARCH_RECORD_TABLES)
         tables.extend(["artifacts", "weekly_digest_reports", "weekly_digest_configs", "reports", "claims", "claim_evidence", "claim_reference_links", "failure_logs", "experiment_log_entries", "decision_logs", "retrospective_notes"])
         return list(dict.fromkeys(tables))
     if scope not in PROJECT_CLEAR_SCOPES:
@@ -2450,15 +2537,25 @@ def _table_count(conn: sqlite3.Connection, table: str, project_id: str) -> int:
     return db_count(conn, table_name, "project_id=?", (project_id,))
 
 
-def _project_dirs_for_scope(project: dict[str, Any], scope: str) -> list[str]:
+def _project_runtime_dirs(agent_root: Path, project: dict[str, Any]) -> list[str]:
+    project_id = clean(project.get("id") or project.get("project_id"))
+    dirs: list[str] = []
+    if project_id:
+        dirs.append(str(data_dir(agent_root) / "literature_harvest" / project_id))
+    return dirs
+
+
+def _project_dirs_for_scope(agent_root: Path, project: dict[str, Any], scope: str) -> list[str]:
     if scope == "uploads":
         return [clean(project.get("uploads_dir"))]
     if scope == "downloaded_pdfs":
         return [clean(project.get("pdf_dir"))]
     if scope == "kb":
         return [clean(project.get("kb_dir"))]
-    if scope in {"all", "purge"}:
+    if scope == "all":
         return [clean(project.get("uploads_dir")), clean(project.get("pdf_dir")), clean(project.get("kb_dir"))]
+    if scope == "purge":
+        return [clean(project.get("root_dir")), clean(project.get("uploads_dir")), clean(project.get("pdf_dir")), clean(project.get("kb_dir")), *_project_runtime_dirs(agent_root, project)]
     return []
 
 
@@ -2472,9 +2569,7 @@ def build_project_deletion_plan(agent_root: Path, project_id: str, scope: str = 
         file_paths = _project_file_paths(conn, project_id, "purge" if purge else scope_key)
     finally:
         conn.close()
-    dirs = [item for item in _project_dirs_for_scope(project, "purge" if purge else scope_key) if item]
-    if purge and clean(project.get("root_dir")):
-        dirs.insert(0, clean(project.get("root_dir")))
+    dirs = [item for item in _project_dirs_for_scope(agent_root, project, "purge" if purge else scope_key) if item]
     existing_files = [path for path in file_paths if Path(path).exists()]
     bytes_to_free = sum(_path_size(Path(path)) for path in existing_files)
     if purge and clean(project.get("root_dir")) and Path(clean(project.get("root_dir"))).exists():
@@ -2572,7 +2667,7 @@ def purge_project(agent_root: Path, project_id: str, dry_run: bool = False, conf
     failed_files = _delete_project_files(plan.get("file_paths") or [])
     if failed_files:
         return {"ok": False, "executed": False, "reason": "file_delete_failed", "deletion_plan": plan, "failed_files": failed_files, "failed_tables": []}
-    failed_dirs = _delete_project_dirs([clean(project.get("root_dir"))])
+    failed_dirs = _delete_project_dirs(plan.get("affected_dirs") or [clean(project.get("root_dir"))])
     if failed_dirs:
         return {"ok": False, "executed": False, "reason": "directory_delete_failed", "deletion_plan": plan, "failed_files": failed_dirs, "failed_tables": []}
     conn = connect(agent_root)
@@ -6340,7 +6435,7 @@ class LLMAdapter:
                             raise http.client.IncompleteRead(b"")
                         payload = json.loads(raw.decode("utf-8"))
                     return clean(payload.get("choices", [{}])[0].get("message", {}).get("content", ""))
-                except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                except (http.client.IncompleteRead, http.client.RemoteDisconnected, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                     last_error = str(exc)
                     if attempt < 3:
                         time.sleep(0.8 * (attempt + 1))
@@ -10756,166 +10851,39 @@ def query_research_rag(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
         retrieval_scope = "cross_project"
     if retrieval_scope != "cross_project":
         retrieval_scope = "current_project"
-    qtokens = rag_tokens(question)
-    if "周报" in question:
-        qtokens.update({"周报", "研究周报", "weekly", "digest", "weekly_digest"})
-    if "digest" in question.lower():
-        qtokens.update({"weekly", "digest", "weekly_digest", "周报"})
-    conn = connect(agent_root)
-    rows: list[dict[str, Any]] = []
-    project_filter_sql = "c.project_id=?"
-    project_filter_params: list[Any] = [project_id]
-    simple_project_filter_sql = "project_id=?"
-    simple_project_filter_params: list[Any] = [project_id]
-    if retrieval_scope == "cross_project":
-        project_filter_sql = "c.project_id IN (SELECT id FROM projects WHERE COALESCE(status,'active')!='archived' AND COALESCE(status,'active')!='purged')"
-        project_filter_params = []
-        simple_project_filter_sql = "project_id IN (SELECT id FROM projects WHERE COALESCE(status,'active')!='archived' AND COALESCE(status,'active')!='purged')"
-        simple_project_filter_params = []
-    include_literature = mode in {"literature_only", "all_project_context", "writing_assistant", "weekly_digest", "agent_chat"}
-    include_memory = mode in {"project_memory_only", "all_project_context", "writing_assistant", "weekly_digest", "agent_chat"}
-    include_logs = mode in {"experiment_logs_only", "all_project_context", "writing_assistant", "agent_chat"}
-    if include_literature:
-        rows.extend(
-            rows_to_dicts(
-                conn.execute(
-                    """
-                    SELECT c.*, c.project_id AS project_id, r.title, r.doi, r.url, r.authors_json, r.year, r.source_provider, r.source_type
-                    FROM reference_chunks c
-                    JOIN "references" r ON r.id=c.reference_id
-                    WHERE """ + project_filter_sql + """
-                    """,
-                    project_filter_params,
-                ).fetchall()
-            )
-        )
-    if include_memory:
-        for memory in rows_to_dicts(
-            conn.execute(
-                f"SELECT * FROM agent_memory_entries WHERE {simple_project_filter_sql} AND memory_scope='project' AND status='active'",
-                simple_project_filter_params,
-            ).fetchall()
-        ):
-            memory_text = " ".join([clean(memory.get("title")), clean(memory.get("content"))])
-            memory_tokens = rag_tokens(memory_text)
-            if clean(memory.get("memory_type")) == "weekly_digest":
-                memory_tokens.update({"周报", "研究周报", "weekly", "digest", "weekly_digest"})
-            rows.append(
-                {
-                    "id": f"memory:{memory['id']}",
-                    "reference_id": f"memory:{memory['id']}",
-                    "project_id": memory.get("project_id"),
-                    "chunk_text": memory_text,
-                    "title": memory.get("title"),
-                    "source_kind": "project_memory",
-                    "memory_type": memory.get("memory_type"),
-                    "token_set": sorted(memory_tokens),
-                }
-            )
-        for item in rows_to_dicts(conn.execute(f"SELECT * FROM conclusions WHERE {simple_project_filter_sql} AND status NOT IN ('superseded','archived','rejected')", simple_project_filter_params).fetchall()):
-            text = clean(item.get("conclusion_text"))
-            rows.append(
-                {
-                    "id": f"conclusion:{item['id']}",
-                    "reference_id": f"conclusion:{item['id']}",
-                    "project_id": item.get("project_id"),
-                    "chunk_text": text,
-                    "title": text[:120] or "Project conclusion",
-                    "source_kind": "project_conclusion",
-                    "token_set": sorted(rag_tokens(text)),
-                    "source_provider": "canonical_memory",
-                }
-            )
-        for item in rows_to_dicts(conn.execute(f"SELECT * FROM decisions WHERE {simple_project_filter_sql} AND status NOT IN ('superseded','archived')", simple_project_filter_params).fetchall()):
-            text = f"{clean(item.get('decision_text'))}. Reason: {clean(item.get('reason'))}"
-            rows.append(
-                {
-                    "id": f"decision:{item['id']}",
-                    "reference_id": f"decision:{item['id']}",
-                    "project_id": item.get("project_id"),
-                    "chunk_text": text,
-                    "title": clean(item.get("decision_text"))[:120] or "Project decision",
-                    "source_kind": "project_decision",
-                    "token_set": sorted(rag_tokens(text)),
-                    "source_provider": "canonical_memory",
-                }
-            )
-        for item in rows_to_dicts(conn.execute(f"SELECT * FROM failure_logs WHERE {simple_project_filter_sql}", simple_project_filter_params).fetchall()):
-            text = f"{clean(item.get('title'))}. {clean(item.get('failure_description') or item.get('observed_failure'))}. {clean(item.get('likely_reason') or item.get('suspected_causes'))}"
-            rows.append(
-                {
-                    "id": f"failure:{item['id']}",
-                    "reference_id": f"failure:{item['id']}",
-                    "project_id": item.get("project_id"),
-                    "chunk_text": text,
-                    "title": clean(item.get("title")) or "Failure record",
-                    "source_kind": "failure_memory",
-                    "token_set": sorted(rag_tokens(text)),
-                    "source_provider": "canonical_memory",
-                }
-            )
-    if include_logs:
-        for log in rows_to_dicts(conn.execute(f"SELECT * FROM experiment_log_entries WHERE {simple_project_filter_sql}", simple_project_filter_params).fetchall()):
-            text = " ".join(clean(log.get(key)) for key in ["objective", "sample_material", "conditions", "observations", "abnormal_events", "failure_reason", "decision", "next_step"])
-            rows.append(
-                {
-                    "id": f"experiment_log:{log['id']}",
-                    "reference_id": f"experiment_log:{log['id']}",
-                    "project_id": log.get("project_id"),
-                    "chunk_text": text,
-                    "title": log.get("experiment_name") or "Experiment log",
-                    "source_kind": "experiment_log",
-                    "token_set": sorted(rag_tokens(text)),
-                }
-            )
-    scored = []
-    for row in rows:
-        tokens = set(row.get("token_set") or []) or rag_tokens(row.get("chunk_text"))
-        overlap = len(qtokens.intersection(tokens))
-        if overlap:
-            score = overlap / max(1, len(qtokens))
-            scored.append((score, row))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    citation_map: dict[str, int] = {}
-    retrieved = []
-    for score, row in scored[:limit]:
-        ref_id = row["reference_id"]
-        is_reference = not str(ref_id).startswith(("memory:", "experiment_log:"))
-        if is_reference and ref_id not in citation_map:
-            citation_map[ref_id] = len(citation_map) + 1
-        citation_number = citation_map.get(ref_id, 0)
-        citation_id = f"[{citation_number}]" if citation_number else f"[{clean(row.get('source_kind')) or 'context'}]"
-        retrieved.append(
-            {
-                "chunk_id": row["id"],
-                "project_id": clean(row.get("project_id")) or project_id,
-                "reference_id": ref_id,
-                "citation_id": citation_id,
-                "citation_number": citation_number,
-                "score": round(score, 4),
-                "title": row.get("title"),
-                "doi": row.get("doi"),
-                "url": row.get("url"),
-                "matched_text": row.get("chunk_text"),
-                "source_kind": clean(row.get("source_kind")) or "article_evidence",
-                "source_provider": row.get("source_provider") or row.get("source_type") or "",
-            }
-        )
-    source_breakdown: dict[str, int] = {}
-    for item in retrieved:
-        source_breakdown[item["source_kind"]] = source_breakdown.get(item["source_kind"], 0) + 1
-    citation_sources = [
+    unified = rag_retrieval_service.unified_rag_query(
+        agent_root,
         {
-            "reference_id": item.get("reference_id") if not clean(item.get("reference_id")).startswith(("memory:", "experiment_log:", "conclusion:", "decision:", "failure:")) else "",
-            "chunk_id": item.get("chunk_id"),
-            "title": item.get("title"),
-            "source_kind": item.get("source_kind"),
+            "project_id": project_id,
+            "question": question,
+            "mode": mode,
+            "retrieval_scope": retrieval_scope,
+            "limit": limit,
+        },
+    )
+    retrieved = [
+        {
+            "chunk_id": item.get("chunk_id") or item.get("source_id"),
+            "project_id": clean(item.get("project_id")) or project_id,
+            "reference_id": clean(item.get("reference_id")),
             "citation_id": item.get("citation_id"),
-            "excerpt": clean(item.get("matched_text"))[:500],
+            "citation_number": int(str(item.get("citation_id") or "").strip("[]") or 0),
+            "score": item.get("score"),
+            "title": item.get("title"),
+            "doi": (item.get("metadata") or {}).get("doi"),
+            "url": (item.get("metadata") or {}).get("url"),
+            "matched_text": item.get("excerpt") or item.get("text"),
+            "source_kind": item.get("source_type"),
+            "source_type": item.get("source_type"),
+            "source_provider": item.get("source_provider"),
+            "evidence_role": item.get("evidence_role"),
+            "can_support_peer_reviewed_evidence": item.get("can_support_peer_reviewed_evidence"),
         }
-        for item in retrieved
+        for item in unified.get("results", [])
     ]
-    citations = build_evidence_citations(agent_root, project_id, citation_sources, [])
+    citations = unified.get("citations", [])
+    citation_map = {clean(item.get("citation_key")): clean(item.get("citation_id")) for item in unified.get("results", []) if clean(item.get("citation_key"))}
+    source_breakdown = unified.get("source_breakdown") or {}
     if retrieved:
         titles = [clean(item.get("display_title") or item.get("title")) for item in citations[:3] if clean(item.get("display_title") or item.get("title"))]
         if not titles:
@@ -10930,11 +10898,14 @@ def query_research_rag(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
     limitations = []
     if any("mock" in clean(item.get("source_provider")).lower() or "mock" in clean(item.get("matched_text")).lower() for item in retrieved):
         limitations.append("Mock/manual provider records are placeholders and must not be treated as real papers.")
-    if any(item.get("source_kind") != "article_evidence" for item in retrieved):
-        limitations.append("Project memory, experiment logs, and agent inferences are context, not peer-reviewed article evidence.")
+    if any(item.get("source_type") == "browser_learning" for item in retrieved):
+        limitations.append("Browser learning is contextual and must not be treated as peer-reviewed article evidence.")
+    if any(item.get("source_type") in {"kb_entry", "brain_note", "agent_memory", "task_status"} for item in retrieved):
+        limitations.append("KB summaries, Brain notes, task status, and agent memory are context or summaries, not original peer-reviewed evidence.")
     if not retrieved:
         limitations.append("No local evidence matched the query.")
     query_id = stable_id(project_id, retrieval_scope, question, now(), length=24)
+    conn = connect(agent_root)
     conn.execute(
         """
         INSERT INTO rag_queries(id, project_id, question, answer, retrieved_chunk_ids_json, citation_map_json, skill_run_id, created_at, mode, limitations_json, source_breakdown_json)
@@ -10975,7 +10946,19 @@ def query_research_rag(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
                 "trust_level": "raw_extracted",
             },
         )
-    return {"query_id": query_id, "answer": answer, "citations": citations, "retrieved_chunks": retrieved, "citation_map": citation_map, "mode": mode, "retrieval_scope": retrieval_scope, "limitations": limitations, "source_breakdown": source_breakdown, "memory": memory}
+    return {
+        "query_id": query_id,
+        "answer": answer,
+        "citations": citations,
+        "retrieved_chunks": retrieved,
+        "citation_map": citation_map,
+        "mode": mode,
+        "retrieval_scope": retrieval_scope,
+        "limitations": limitations,
+        "source_breakdown": source_breakdown,
+        "retrieval_service": "unified_rag_query",
+        "memory": memory,
+    }
 
 
 def list_rag_queries(agent_root: Path, project_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
@@ -12780,13 +12763,22 @@ def is_self_description_or_architecture_message(message: str) -> bool:
         "agent architecture",
         "how many agents",
         "what are you",
+        "deepseek",
+        "gpt",
         "system prompt",
         "developer instruction",
         "hidden prompt",
         "internal prompt",
+        "internal rules",
+        "admin",
+        "administrator",
+        "deepseek",
+        "gpt",
+        "internal rules",
     ]
-    chinese_terms = ["模型", "api key", "记忆架构", "记忆系统", "多少个 agent", "由多少 agent", "架构是什么", "提示词", "系统提示", "开发者指令", "内部指令"]
-    return is_capability_query_message(message) or any(term in lower for term in terms) or any(term in text for term in chinese_terms)
+    chinese_terms = ["模型", "api key", "记忆架构", "记忆系统", "多少个 agent", "由多少 agent", "架构是什么", "提示词", "系统提示", "开发者指令", "内部指令", "内部规则"]
+    extra_chinese_terms = ["内部规则", "管理员", "DeepSeek", "GPT"]
+    return is_capability_query_message(message) or any(term in lower for term in terms) or any(term in text for term in chinese_terms) or any(term in text for term in extra_chinese_terms)
 
 
 def is_memory_commit_request(message: str) -> bool:
@@ -12855,6 +12847,10 @@ def is_file_registry_query_message(message: str) -> bool:
         "saved directory",
         "xlsx file",
         "pdf file",
+        "data file",
+        "data files",
+        "what data files",
+        "which data files",
     ]
     chinese_terms = [
         "保存路径",
@@ -12867,14 +12863,19 @@ def is_file_registry_query_message(message: str) -> bool:
         "xlsx 文件",
         "xlsx",
         "pdf 文件",
+        "数据文件",
+        "有哪些数据文件",
+        "项目现在有哪些数据文件",
         "保存目录",
         "路径是什么",
         "文件有没有保存",
         "上传成功了吗",
         "上传成功没",
         "上传的文件",
+        "数据文件",
+        "有哪些数据文件",
     ]
-    has_file = any(term in lower for term in ["file", "upload", "uploaded", "xlsx", "pdf", "path"]) or any(term in text for term in ["文件", "上传", "xlsx", "pdf", "路径", "目录"])
+    has_file = any(term in lower for term in ["file", "upload", "uploaded", "xlsx", "pdf", "path", "data file"]) or any(term in text for term in ["文件", "上传", "xlsx", "pdf", "路径", "目录", "数据文件"])
     return has_file and (any(term in lower for term in english_terms) or any(term in text for term in chinese_terms))
 
 
@@ -14322,7 +14323,7 @@ def format_paper_recommendation_answer(agent_root: Path, project_id: str, messag
 def format_self_description_answer(message: str = "") -> str:
     text = clean(message)
     lower = text.lower()
-    if any(term in lower for term in ["system prompt", "developer instruction", "hidden prompt", "internal prompt"]) or any(term in text for term in ["提示词", "系统提示", "开发者指令", "内部指令"]):
+    if any(term in lower for term in ["system prompt", "developer instruction", "hidden prompt", "internal prompt", "internal rules"]) or any(term in text for term in ["提示词", "系统提示", "开发者指令", "内部指令", "内部规则"]):
         return (
             "我不会输出内部提示、系统配置或隐藏指令。"
             "如果你是在排查回答质量，可以描述具体问题；我可以说明可见能力、数据来源范围、任务状态和下一步建议。"
@@ -15198,9 +15199,15 @@ def is_conversation_history_query(message: str) -> bool:
         "继续刚才",
         "你刚才说",
         "刚才说的",
+        "上一个回答",
+        "上一条回答",
+        "前一个回答",
+        "回答第二点",
         "what did i ask",
         "previous question",
         "last question",
+        "previous answer",
+        "last answer",
     ]
     return any(pattern in lower for pattern in patterns)
 
@@ -15989,6 +15996,7 @@ def get_researchos_capability_status(agent_root: Path, project_id: str = "") -> 
         "literature_harvest": "missing",
         "kb_rag": "missing",
         "project_memory": "missing",
+        "memory_source_of_truth": "missing",
         "execution_memory": "missing",
         "artifact_store": "missing",
         "response_formatter": "missing",
@@ -16117,6 +16125,31 @@ def get_researchos_capability_status(agent_root: Path, project_id: str = "") -> 
                 set_detail("project_memory", "partial", ["memory table and functions exist", "main workflow wiring not confirmed"])
         else:
             set_detail("project_memory", memory_status, memory_evidence)
+
+        registry_status, registry_evidence = _capability_status(["memory_backend_registry"], ["list_memory_backend_registry", "get_memory_source_of_truth_health"], conn=conn)
+        if registry_status == "real":
+            primary_count = db_count(
+                conn,
+                "memory_backend_registry",
+                "backend_name=? AND source_of_truth=1 AND status='active'",
+                (PRIMARY_MEMORY_BACKEND,),
+            )
+            derived_count = db_count(conn, "memory_backend_registry", "source_of_truth=0 AND status='active'")
+            if primary_count >= 7 and derived_count >= 4:
+                set_detail(
+                    "memory_source_of_truth",
+                    "real",
+                    [f"{primary_count} primary memory classes registered", f"{derived_count} derived backends registered", "health check function exists"],
+                )
+            else:
+                set_detail(
+                    "memory_source_of_truth",
+                    "partial",
+                    [f"{primary_count} primary memory classes registered", f"{derived_count} derived backends registered"],
+                )
+                _append_gap(status, "Memory backend registry exists, but source-of-truth declarations are incomplete.", "Bootstrap all primary and derived memory backend registry rows.")
+        else:
+            set_detail("memory_source_of_truth", registry_status, registry_evidence)
 
         execution_status, execution_evidence = _capability_status(["skill_runs", "execution_memory"], ["start_service_skill_run", "finish_service_skill_run", "upsert_execution_memory_for_skill_run", "list_execution_memory"], conn=conn)
         if execution_status == "real":
@@ -19699,6 +19732,139 @@ def list_agent_memory(agent_root: Path, scope: str = "", project_id: str = "", i
         "system_memory": [entry for entry in entries if entry.get("memory_scope") == "system"],
         "project_memory": [entry for entry in entries if entry.get("memory_scope") == "project"],
         "entries": entries,
+    }
+
+
+def list_memory_backend_registry(agent_root: Path, memory_class: str = "") -> list[dict[str, Any]]:
+    conn = connect(agent_root)
+    try:
+        bootstrap_memory_backend_registry(conn)
+        clauses = ["status='active'"]
+        params: list[Any] = []
+        if clean(memory_class):
+            clauses.append("memory_class=?")
+            params.append(clean(memory_class))
+        return rows_to_dicts(
+            conn.execute(
+                f"SELECT * FROM memory_backend_registry WHERE {' AND '.join(clauses)} ORDER BY source_of_truth DESC, memory_class, backend_name",
+                params,
+            ).fetchall()
+        )
+    finally:
+        conn.close()
+
+
+def _optional_memory_backend_files(agent_root: Path) -> dict[str, dict[str, Any]]:
+    root = Path(agent_root)
+    return {
+        "agent_memory.sqlite": {"path": str(root / "agent_memory.sqlite"), "exists": (root / "agent_memory.sqlite").exists(), "required_for_answers": False},
+        "lab_agent_mvp.sqlite": {"path": str(root / "lab_agent_mvp.sqlite"), "exists": (root / "lab_agent_mvp.sqlite").exists(), "required_for_answers": False},
+        "manage-agent-memory folder": {"path": str(WORKSPACE_ROOT / "manage-agent-memory"), "exists": (WORKSPACE_ROOT / "manage-agent-memory").exists(), "required_for_answers": False},
+        "backend/researchos/brain": {"path": str(WORKSPACE_ROOT.parent.parent / "backend" / "researchos" / "brain"), "exists": (WORKSPACE_ROOT.parent.parent / "backend" / "researchos" / "brain").exists(), "required_for_answers": False},
+    }
+
+
+def get_memory_source_of_truth_health(agent_root: Path, project_id: str = "", *, write_probe: bool = True) -> dict[str, Any]:
+    project_id = clean(project_id)
+    registry = list_memory_backend_registry(agent_root)
+    primary_classes = {
+        "projects",
+        "tasks",
+        "chat",
+        "agent_memory_entries",
+        "references",
+        "reference_chunks",
+        "knowledge_base_entries",
+    }
+    primary_rows = [
+        row
+        for row in registry
+        if row.get("memory_class") in primary_classes
+        and clean(row.get("backend_name")) == PRIMARY_MEMORY_BACKEND
+        and int(row.get("source_of_truth") or 0) == 1
+    ]
+    optional_backends = _optional_memory_backend_files(Path(agent_root))
+    checks: dict[str, Any] = {
+        "registry_declared": {"ok": len(primary_rows) == len(primary_classes), "primary_classes": sorted(row.get("memory_class") for row in primary_rows)},
+        "derived_missing_does_not_block": {
+            "ok": True,
+            "optional_backends": optional_backends,
+            "missing_optional": [name for name, item in optional_backends.items() if not item.get("exists")],
+        },
+        "main_context_retrieval": {"ok": False, "probe": "", "context_item_count": 0},
+        "primary_priority": {"ok": False, "derived_context_items": []},
+    }
+    probe_id = ""
+    probe_content = ""
+    try:
+        if project_id and write_probe:
+            probe_id = stable_id("memory_source_truth_probe", project_id, now(), length=24)
+            probe_content = f"MEMORY_SOURCE_OF_TRUTH_HEALTH_PROBE {probe_id}"
+            timestamp = now()
+            conn = connect(agent_root)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO agent_memory_entries(
+                      id, memory_scope, project_id, memory_type, title, content, structured_content_json,
+                      source_type, source_id, provenance_json, confidence, trust_level, status, created_at, updated_at
+                    )
+                    VALUES (?, 'project', ?, 'health_probe', 'Memory source of truth health probe', ?, '{}',
+                            'memory_source_of_truth_health', ?, '[]', 1.0, 'system', 'active', ?, ?)
+                    """,
+                    (probe_id, project_id, probe_content, probe_id, timestamp, timestamp),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        context = (
+            research_context_compiler.compile_research_context(
+                agent_root,
+                {
+                    "project_id": project_id,
+                    "user_message": probe_content or "memory source of truth health",
+                    "intent": "research_advice",
+                    "max_tokens": 6000,
+                },
+            )
+            if project_id
+            else {"compiled_context": "", "context_items": []}
+        )
+        context_items = [item for item in as_list(context.get("context_items")) if isinstance(item, dict)]
+        rendered = clean(context.get("compiled_context"))
+        if probe_content:
+            checks["main_context_retrieval"] = {
+                "ok": probe_content in rendered or any(probe_content in clean(item.get("content")) for item in context_items),
+                "probe": probe_id,
+                "context_item_count": len(context_items),
+            }
+        else:
+            checks["main_context_retrieval"] = {"ok": bool(context_items), "probe": "", "context_item_count": len(context_items)}
+        derived_items = [
+            {
+                "source_type": clean(item.get("source_type")),
+                "source_id": clean(item.get("source_id")),
+                "source_of_truth": clean((item.get("metadata") or {}).get("source_of_truth")) if isinstance(item.get("metadata"), dict) else "",
+                "source_role": clean((item.get("metadata") or {}).get("source_role")) if isinstance(item.get("metadata"), dict) else "",
+            }
+            for item in context_items
+            if isinstance(item.get("metadata"), dict) and clean(item.get("metadata", {}).get("source_role")) == "derived"
+        ]
+        checks["primary_priority"] = {"ok": not derived_items, "derived_context_items": derived_items}
+    finally:
+        if probe_id:
+            conn = connect(agent_root)
+            try:
+                conn.execute("DELETE FROM agent_memory_entries WHERE id=? AND source_type='memory_source_of_truth_health'", (probe_id,))
+                conn.commit()
+            finally:
+                conn.close()
+    ok = all(bool(item.get("ok")) for item in checks.values())
+    return {
+        "status": "ok" if ok else "degraded",
+        "primary_backend": PRIMARY_MEMORY_BACKEND,
+        "registry": registry,
+        "checks": checks,
     }
 
 

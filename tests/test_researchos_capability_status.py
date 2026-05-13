@@ -34,6 +34,7 @@ class ResearchOSCapabilityStatusTests(unittest.TestCase):
             "literature_harvest",
             "kb_rag",
             "project_memory",
+            "memory_source_of_truth",
             "execution_memory",
             "artifact_store",
             "response_formatter",

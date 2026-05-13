@@ -12,9 +12,10 @@ from .agent_protocol import (
     build_execution_context_package,
 )
 from .execution_agent import ResearchExecutionAgent
-from backend.researchos.execution.runtime_adapter import scripts_dir
+from backend.researchos.execution.runtime_adapter import check_pipeline_authorization, scripts_dir
 from backend.researchos.brain.context_indexer import update_project_context_index
-from backend.researchos.brain.memory_writer import write_memory_from_execution_result
+from backend.researchos.brain.evidence_promotion import promote_skill_outputs_to_brain, validate_skill_output
+from backend.researchos.brain.memory_writer import write_memory_from_execution_result, write_memory_from_promotion_decision
 from backend.researchos.brain.post_task_reflector import reflect_on_completed_skillrun
 from backend.researchos.brain.research_graph import rebuild_graph
 from backend.researchos.brain.scientific_memory_validator import validate_memory_write
@@ -22,6 +23,7 @@ from backend.researchos.brain.skill_crystallizer import crystallize_skill_from_r
 from backend.researchos.brain.skill_registry_review import register_pending_skill
 from backend.researchos.brain.workflow_template_builder import build_workflow_template_from_skillruns, save_workflow_template
 from backend.researchos.skills.pipeline_registry import get_pipeline_for_intent, route_query_to_pipeline
+from backend.researchos.skills.skill_discovery import search_skills
 
 
 class ResearchBrainAgent:
@@ -99,9 +101,19 @@ class ResearchBrainAgent:
         required_skills = list(pipeline.get("execution_skills") or []) if use_pipeline else self._skills_for_task(task_type)
         expected_outputs = list(pipeline.get("expected_outputs") or []) if use_pipeline else self._outputs_for_task(task_type)
         validation_rules = list(pipeline.get("validation_rules") or []) if use_pipeline else ["Only use the supplied execution_minimal context.", "Return sources for evidence-backed outputs."]
+        discovered_skills: list[dict[str, Any]] = []
+        if not use_pipeline:
+            discovered_skills = search_skills(user_query, intent=intent, top_k=1)
+            if discovered_skills:
+                required_skills = [str(item["skill_id"]) for item in discovered_skills]
         safety_constraints = ["Do not write long-term memory.", "Do not modify confirmed claims.", "Do not access forbidden context types."]
         if pipeline.get("requires_user_authorization"):
             safety_constraints.append("requires_user_authorization")
+        user_authorization_flags = dict(compiled_context.get("user_authorization_flags") or compiled_context.get("authorization_flags") or {})
+        if compiled_context.get("authorized") is True:
+            user_authorization_flags["authorized"] = True
+        if compiled_context.get("browser_authorized") is True:
+            user_authorization_flags["browser"] = True
         spec = TaskSpec(
             project_id=compiled_context.get("project_id"),
             user_query=user_query,
@@ -117,19 +129,54 @@ class ResearchBrainAgent:
             max_context_tokens=1500,
         )
         spec.input_data["pipeline_name"] = pipeline.get("pipeline_name") if use_pipeline else ""
-        spec.input_data["authorized"] = False if pipeline.get("requires_user_authorization") else True
+        if user_authorization_flags:
+            spec.input_data["user_authorization_flags"] = user_authorization_flags
         spec.input_data["control_skills"] = control_skills
         spec.input_data["routing_control_skill"] = "skill-router-orchestrator"
         spec.input_data["context_control_skill"] = "context-compiler-maintenance"
+        if discovered_skills:
+            spec.input_data["skill_discovery"] = [
+                {
+                    "skill_id": item.get("skill_id"),
+                    "display_name": item.get("display_name"),
+                    "canonical_path": item.get("canonical_path"),
+                    "score": item.get("score"),
+                }
+                for item in discovered_skills
+            ]
         spec.context_package = build_execution_context_package(spec, compiled_context)
         spec.context_redaction_report = {"source": "build_execution_context_package", "control_skill": "context-compiler-maintenance", "raw_compiled_context_not_forwarded": True}
         spec.context_source_ids = [str(item.get("source_id") or item.get("id")) for item in spec.context_package.get("relevant_sources", []) if isinstance(item, dict)]
+        authorization = check_pipeline_authorization(spec, pipeline)
+        if authorization["requires_user_authorization"] and "requires_user_authorization" not in spec.safety_constraints:
+            spec.safety_constraints.append("requires_user_authorization")
+        spec.input_data["authorization_report"] = authorization
+        spec.input_data["authorized"] = True if not authorization["requires_user_authorization"] else authorization["valid"]
         return spec
 
     def dispatch_to_execution(self, task_spec: TaskSpec) -> ExecutionResult:
+        pipeline = get_pipeline_for_intent(str(task_spec.input_data.get("pipeline_name") or task_spec.intent or task_spec.task_type))
+        authorization = check_pipeline_authorization(task_spec, pipeline)
+        if not authorization["valid"]:
+            return ExecutionResult(
+                task_id=task_spec.task_id,
+                status="failed",
+                summary="Execution blocked pending explicit user authorization.",
+                logs=["authorization pre-dispatch rejected"],
+                errors=authorization["errors"],
+                validation_report={"authorization": authorization},
+            )
         return self.execution_agent.execute_task(task_spec)
 
     def evaluate_execution_result(self, result: ExecutionResult, task_spec: TaskSpec) -> BrainDecision:
+        authorization = (result.validation_report or {}).get("authorization") if isinstance(result.validation_report, dict) else {}
+        if isinstance(authorization, dict) and authorization.get("missing_authorization"):
+            return BrainDecision(
+                decision_type="ask_user",
+                reason="Execution requires explicit user authorization before dispatch.",
+                next_task_spec=task_spec,
+                user_facing_summary="这个任务需要你明确授权后才能执行，尤其是浏览器或远程浏览器相关步骤。",
+            )
         if result.status == "success":
             claim_text = result.structured_outputs.get("claim_text") if isinstance(result.structured_outputs, dict) else ""
             if claim_text:
@@ -162,6 +209,17 @@ class ResearchBrainAgent:
         if decision.decision_type not in {"accept", "write_memory", "revise"}:
             return {"pages": [], "skipped": f"decision_type={decision.decision_type}"}
         return write_memory_from_execution_result(result, decision, task_spec)
+
+    def validate_execution_result_for_promotion(self, result: ExecutionResult, task_spec: TaskSpec, pipeline: dict[str, Any]) -> dict[str, Any]:
+        report = validate_skill_output(result, task_spec, pipeline)
+        result.validation_report = {**(result.validation_report or {}), "skill_output_validator": report}
+        return report
+
+    def promote_execution_result(self, result: ExecutionResult, task_spec: TaskSpec, pipeline: dict[str, Any]) -> dict[str, Any]:
+        return promote_skill_outputs_to_brain(result, task_spec, pipeline)
+
+    def commit_promoted_memory(self, promotion_decision: dict[str, Any]) -> dict[str, Any]:
+        return write_memory_from_promotion_decision(promotion_decision)
 
     def update_research_graph(self, project_id: str | None) -> dict[str, Any]:
         return rebuild_graph(project_id)
@@ -202,7 +260,13 @@ class ResearchBrainAgent:
             errors=reflection.get("failure_items") or [],
         )
         decision = self.evaluate_execution_result(result, task_spec)
-        memory_write = self.write_memory_from_result(result, decision, task_spec) if reflection.get("should_update_brain") else {"pages": [], "skipped": "reflection skipped brain update"}
+        if reflection.get("should_update_brain"):
+            pipeline = get_pipeline_for_intent(task_spec.intent)
+            self.validate_execution_result_for_promotion(result, task_spec, pipeline)
+            promotion = self.promote_execution_result(result, task_spec, pipeline)
+            memory_write = self.commit_promoted_memory(promotion)
+        else:
+            memory_write = {"pages": [], "skipped": "reflection skipped brain update"}
         graph = self.update_research_graph(project_id)
         context_index = self.update_context_index(project_id)
         pending_skill = self.crystallize_skill_if_useful(reflection)

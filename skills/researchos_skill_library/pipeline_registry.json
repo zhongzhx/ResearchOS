@@ -5,13 +5,15 @@
       "pipeline_name": "literature_harvest",
       "intent": "literature_harvest",
       "trigger_phrases": [
-        "\\u6587\\u732e\\u91c7\\u96c6",
-        "\\u641c\\u7d22\\u6587\\u732e",
-        "\\u4e0b\\u8f7d\\u8bba\\u6587",
-        "\\u4e0b\\u8f7d",
+        "\u6587\u732e\u91c7\u96c6",
+        "\u641c\u7d22\u6587\u732e",
+        "\u4e0b\u8f7d\u8bba\u6587",
+        "\u4e0b\u8f7d\u6587\u732e",
+        "\u8bba\u6587\u91c7\u96c6",
         "keyword harvest",
         "literature harvest",
-        "download literature"
+        "download literature",
+        "paper search"
       ],
       "planner_agent": "brain_agent",
       "executor_agent": "execution_agent",
@@ -74,8 +76,10 @@
       "pipeline_name": "browser_research_learning",
       "intent": "browser_research_learning",
       "trigger_phrases": [
-        "\\u6d4f\\u89c8\\u5668\\u5b66\\u4e60",
-        "\\u7f51\\u9875\\u5b66\\u4e60",
+        "\u6d4f\u89c8\u5668\u5b66\u4e60",
+        "\u7f51\u9875\u5b66\u4e60",
+        "\u5b66\u4e60\u8fd9\u4e2a\u7f51\u9875",
+        "\u6d4f\u89c8\u7f51\u9875",
         "browser learning",
         "learn this website"
       ],
@@ -131,8 +135,9 @@
       "pipeline_name": "research_route_planning",
       "intent": "research_route_planning",
       "trigger_phrases": [
-        "\\u89c4\\u5212\\u7814\\u7a76\\u8def\\u7ebf",
-        "\\u9879\\u76ee\\u8def\\u7ebf",
+        "\u89c4\u5212\u7814\u7a76\u8def\u7ebf",
+        "\u9879\u76ee\u8def\u7ebf",
+        "\u7814\u7a76\u8def\u7ebf\u89c4\u5212",
         "research route",
         "research planning"
       ],
@@ -186,10 +191,12 @@
       "pipeline_name": "protocol_to_sop",
       "intent": "protocol_to_sop",
       "trigger_phrases": [
-        "Methods \\u8f6c SOP",
+        "Methods \u8f6c SOP",
+        "\u65b9\u6cd5\u8f6c SOP",
+        "\u5b9e\u9a8c\u6b65\u9aa4\u8f6c SOP",
         "method to SOP",
         "protocol to sop",
-        "\\u751f\\u6210 SOP"
+        "\u751f\u6210 SOP"
       ],
       "planner_agent": "brain_agent",
       "executor_agent": "execution_agent",
@@ -243,8 +250,9 @@
       "pipeline_name": "experiment_design",
       "intent": "experiment_design",
       "trigger_phrases": [
-        "\\u5b9e\\u9a8c\\u8bbe\\u8ba1",
-        "\\u5b9e\\u9a8c\\u5206\\u7ec4",
+        "\u5b9e\u9a8c\u8bbe\u8ba1",
+        "\u5b9e\u9a8c\u5206\u7ec4",
+        "\u8bbe\u8ba1\u5b9e\u9a8c",
         "experiment design",
         "design experiment"
       ],
@@ -297,8 +305,9 @@
       "pipeline_name": "data_analysis_to_narrative",
       "intent": "data_analysis_to_narrative",
       "trigger_phrases": [
-        "\\u5206\\u6790 CSV \\u5e76\\u5199\\u7ed3\\u679c\\u6bb5",
-        "\\u5206\\u6790\\u6570\\u636e\\u5199\\u7ed3\\u679c",
+        "\u5206\u6790 CSV \u5e76\u5199\u7ed3\u679c\u6bb5",
+        "\u5206\u6790\u6570\u636e\u5199\u7ed3\u679c",
+        "CSV \u7ed3\u679c\u6bb5",
         "data analysis narrative",
         "parse csv and write results"
       ],
@@ -360,8 +369,9 @@
       "pipeline_name": "failure_recovery",
       "intent": "failure_recovery",
       "trigger_phrases": [
-        "\\u5b9e\\u9a8c\\u5931\\u8d25\\u590d\\u76d8",
-        "\\u5931\\u8d25\\u8bb0\\u5f55",
+        "\u5b9e\u9a8c\u5931\u8d25\u590d\u76d8",
+        "\u5931\u8d25\u590d\u76d8",
+        "\u5931\u8d25\u8bb0\u5f55",
         "failure recovery",
         "diagnose bottleneck"
       ],
@@ -415,10 +425,11 @@
       "pipeline_name": "writing_review",
       "intent": "writing_review",
       "trigger_phrases": [
-        "\\u6a21\\u62df\\u5ba1\\u7a3f\\u4eba\\u6279\\u8bc4",
+        "\u6a21\u62df\u5ba1\u7a3f\u4eba\u6279\u8bc4",
+        "\u5ba1\u7a3f\u4eba\u6279\u8bc4",
         "peer review",
         "review my draft",
-        "\\u8bba\\u6587\\u5ba1\\u7a3f"
+        "\u8bba\u6587\u5ba1\u7a3f"
       ],
       "planner_agent": "brain_agent",
       "executor_agent": "execution_agent",
@@ -470,10 +481,10 @@
       "pipeline_name": "weekly_reporting",
       "intent": "weekly_reporting",
       "trigger_phrases": [
-        "\\u5468\\u62a5",
+        "\u5468\u62a5",
         "weekly report",
         "weekly digest",
-        "\\u9879\\u76ee\\u5468\\u62a5"
+        "\u9879\u76ee\u5468\u62a5"
       ],
       "planner_agent": "brain_agent",
       "executor_agent": "execution_agent",
@@ -525,10 +536,10 @@
       "pipeline_name": "entity_extraction",
       "intent": "entity_extraction",
       "trigger_phrases": [
-        "\\u63d0\\u53d6\\u5b9e\\u4f53",
+        "\u63d0\u53d6\u5b9e\u4f53",
         "extract entities",
-        "\\u9776\\u70b9\\u6a21\\u578b\\u65b9\\u6cd5",
-        "\\u5b9e\\u4f53\\u62bd\\u53d6"
+        "\u9776\u70b9\u6a21\u578b\u65b9\u6cd5",
+        "\u5b9e\u4f53\u62bd\u53d6"
       ],
       "planner_agent": "brain_agent",
       "executor_agent": "execution_agent",

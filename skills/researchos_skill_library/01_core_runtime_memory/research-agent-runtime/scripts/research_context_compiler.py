@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import rag_retrieval_service
+
 
 def clean(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -109,6 +111,50 @@ def text_score(item: dict[str, Any], terms: list[str]) -> int:
     return sum(1 for term in terms if term.lower() in haystack)
 
 
+PRIMARY_MEMORY_BACKEND = "research_group_os.sqlite"
+PRIMARY_CONTEXT_SOURCE_TYPES = {
+    "project",
+    "project_status",
+    "task_status",
+    "memory_entity",
+    "agent_memory",
+    "reference",
+    "reference_chunk",
+    "kb_entry",
+    "browser_learning",
+    "brain_note",
+    "data_file",
+    "data_context",
+    "claim",
+    "failure",
+    "decision",
+}
+
+
+def source_authority_metadata(memory_class: str, *, source_role: str = "primary", extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "memory_class": clean(memory_class),
+        "source_of_truth": PRIMARY_MEMORY_BACKEND,
+        "source_role": clean(source_role) or "primary",
+        **(extra or {}),
+    }
+
+
+def memory_backend_registry_for_context(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if not table_exists(conn, "memory_backend_registry"):
+        return []
+    return rows_to_dicts(
+        conn.execute(
+            """
+            SELECT memory_class, backend_name, owner, source_of_truth, derived_from, sync_policy, last_sync_time, status
+            FROM memory_backend_registry
+            WHERE status='active'
+            ORDER BY source_of_truth DESC, memory_class, backend_name
+            """
+        ).fetchall()
+    )
+
+
 def add_context_item(
     items: list[dict[str, Any]],
     *,
@@ -123,6 +169,12 @@ def add_context_item(
     source_id = clean(source_id)
     if not content and not title:
         return
+    merged_metadata = metadata or {}
+    if source_type in PRIMARY_CONTEXT_SOURCE_TYPES and not clean(merged_metadata.get("source_of_truth")):
+        merged_metadata = {
+            **source_authority_metadata(source_type),
+            **merged_metadata,
+        }
     items.append(
         {
             "source_type": source_type,
@@ -130,7 +182,7 @@ def add_context_item(
             "title": clean(title)[:180],
             "content": content[:1800],
             "priority": int(priority),
-            "metadata": metadata or {},
+            "metadata": merged_metadata,
         }
     )
 
@@ -289,18 +341,24 @@ def _project_status_excerpt(summary: Any) -> str:
     data = summary if isinstance(summary, dict) else json_loads(summary, {})
     if not isinstance(data, dict):
         return _redact_internal_text(summary)
-    parts = []
-    labels = [
-        ("file_count", "files"),
-        ("pdf_count", "PDFs"),
-        ("kb_count", "indexed knowledge items"),
-        ("memory_count", "project memories"),
-        ("tasks_count", "tasks"),
-    ]
-    for key, label in labels:
-        if key in data:
-            parts.append(f"{label}: {int(data.get(key) or 0)}")
-    return ", ".join(parts)
+    files = int(data.get("file_count") or 0)
+    pdfs = int(data.get("pdf_count") or 0)
+    kb_entries = int(data.get("kb_count") or 0)
+    memory = int(data.get("memory_count") or 0)
+    tasks = int(data.get("tasks_count") or 0)
+    return f"Current project has recorded {files} files, {pdfs} PDFs, {kb_entries} KB entries, {memory} memory items, and {tasks} tasks."
+
+
+def _public_file_field(value: Any) -> str:
+    text = clean(value)
+    if not text:
+        return ""
+    text = re.sub(r"Traceback \(most recent call last\).*$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    for key in HIDDEN_INTERNAL_FIELDS:
+        pattern = _hidden_key_pattern(key)
+        text = re.sub(rf'"{pattern}"\s*:\s*"[^"]*"\s*,?', "", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{pattern}\s*[=:]\s*[^;,\n]+", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", text).strip(" ;,")
 
 
 def _context_item_excerpt(item: dict[str, Any]) -> str:
@@ -355,22 +413,23 @@ def _render_user_answer_context(raw_context: dict[str, Any], user_visible_task_s
             if not isinstance(file_item, dict):
                 continue
             parts = [
-                f"original_filename: {_redact_internal_text(file_item.get('original_filename'))}",
-                f"human_readable_status: {human_readable_status(file_item.get('parse_status'))}",
+                f"original_filename: {_public_file_field(file_item.get('original_filename'))}",
+                f"display_name: {_public_file_field(file_item.get('display_name') or file_item.get('original_filename'))}",
+                f"human_readable_status: {_public_file_field(file_item.get('human_readable_status') or human_readable_status(file_item.get('parse_status')))}",
             ]
-            stored_path = _redact_internal_text(file_item.get("stored_path"))
+            stored_path = _public_file_field(file_item.get("stored_path"))
             if stored_path:
                 parts.append(f"stored_path: {stored_path}")
-            updated = clean(file_item.get("updated_at") or file_item.get("upload_time"))
-            if updated:
-                parts.append(f"updated_at: {updated}")
+            created = clean(file_item.get("created_at") or file_item.get("upload_time") or file_item.get("updated_at"))
+            if created:
+                parts.append(f"created_at: {created}")
             lines.append("- " + "; ".join(part for part in parts if not part.endswith(": ")))
     else:
         lines.append("- None selected.")
 
     section_specs = [
         ("Relevant memory", ["memory_entity", "agent_memory", "experiment", "sample", "data_context", "claim", "failure", "decision"]),
-        ("Evidence/RAG", ["reference", "rag_chunk"]),
+        ("Evidence/RAG", ["reference", "reference_chunk", "kb_entry", "browser_learning", "brain_note"]),
         ("Capability summary", ["capability", "safety_policy"]),
     ]
     for section_title, source_types in section_specs:
@@ -587,13 +646,17 @@ def recent_uploaded_files_for_context(conn: sqlite3.Connection, project_id: str,
     rows = select_recent(conn, "research_files", project_id=project_id, fields=fields, limit=limit)
     files: list[dict[str, Any]] = []
     for row in rows:
+        original = clean(row.get("original_filename"))
         files.append(
             {
-                "original_filename": clean(row.get("original_filename")),
+                "original_filename": original,
+                "display_name": original,
+                "human_readable_status": human_readable_status(clean(row.get("parse_status")) or "not_parsed"),
                 "stored_path": clean(row.get("stored_path")),
                 "parse_status": clean(row.get("parse_status")) or "not_parsed",
                 "file_type": clean(row.get("file_type")),
                 "upload_time": clean(row.get("upload_time") or row.get("imported_at") or row.get("created_at")),
+                "created_at": clean(row.get("created_at") or row.get("upload_time") or row.get("imported_at")),
             }
         )
     return files
@@ -761,7 +824,10 @@ def source_budget_for_intent(intent: str) -> dict[str, int]:
             "memory_entity": 2,
             "agent_memory": 2,
             "reference": 2,
-            "rag_chunk": 2,
+            "reference_chunk": 2,
+            "kb_entry": 2,
+            "browser_learning": 1,
+            "brain_note": 1,
         }
     if intent == "file_query":
         return {"project": 1, "project_status": 1, "recent_uploaded_file": 10, "data_file": 10}
@@ -772,10 +838,14 @@ def source_budget_for_intent(intent: str) -> dict[str, int]:
             "memory_entity": 5,
             "agent_memory": 5,
             "reference": 5,
-            "rag_chunk": 6,
+            "reference_chunk": 6,
+            "kb_entry": 4,
+            "browser_learning": 2,
+            "brain_note": 3,
             "task_status": 2,
             "recent_uploaded_file": 3,
             "data_file": 3,
+            "capability": 3,
         }
     if intent == "safety_context":
         return {"safety_policy": 2}
@@ -793,14 +863,28 @@ def priority_for_source(intent: str, source_type: str, base_priority: int) -> in
             "memory_entity": 45,
             "agent_memory": 45,
             "reference": 35,
-            "rag_chunk": 35,
+            "reference_chunk": 35,
+            "kb_entry": 34,
+            "browser_learning": 25,
+            "brain_note": 30,
         }
         return boosts.get(source_type, min(base_priority, 40))
     if intent == "file_query":
         boosts = {"recent_uploaded_file": 118, "data_file": 112, "project": 80, "project_status": 78}
         return boosts.get(source_type, min(base_priority, 30))
     if intent == "research_advice":
-        boosts = {"project": 100, "project_status": 92, "memory_entity": 84, "agent_memory": 84, "reference": 82, "rag_chunk": 82, "task_status": 60}
+        boosts = {
+            "project": 100,
+            "project_status": 92,
+            "memory_entity": 84,
+            "agent_memory": 84,
+            "reference": 82,
+            "reference_chunk": 82,
+            "kb_entry": 80,
+            "brain_note": 78,
+            "browser_learning": 58,
+            "task_status": 60,
+        }
         return boosts.get(source_type, base_priority)
     return base_priority
 
@@ -850,7 +934,7 @@ def render_context(items: list[dict[str, Any]], warnings: list[str]) -> str:
         ("Current task status", ["task_status"]),
         ("Recent uploaded files", ["recent_uploaded_file", "data_file"]),
         ("Relevant memory", ["memory_entity", "agent_memory", "experiment", "sample", "data_context", "claim", "failure", "decision"]),
-        ("Evidence/RAG", ["reference", "rag_chunk"]),
+        ("Evidence/RAG", ["reference", "reference_chunk", "kb_entry", "browser_learning", "brain_note"]),
     ]
     for section_title, source_types in sections:
         rows = [row for source_type in source_types for row in grouped.get(source_type, [])]
@@ -892,10 +976,12 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
     active_project: dict[str, Any] = {}
     recent_uploaded_files: list[dict[str, Any]] = []
     project_status_summary: dict[str, int] = {"file_count": 0, "pdf_count": 0, "kb_count": 0, "memory_count": 0, "tasks_count": 0}
+    memory_backend_registry: list[dict[str, Any]] = []
     try:
         active_project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()) if table_exists(conn, "projects") and project_id else {}
         recent_uploaded_files = recent_uploaded_files_for_context(conn, project_id)
         project_status_summary = project_status_summary_for_context(conn, project_id)
+        memory_backend_registry = memory_backend_registry_for_context(conn)
         if context_intent == "safety_context":
             add_context_item(
                 items,
@@ -909,7 +995,15 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
         if "project" in sections:
             project = active_project
             if project:
-                add_context_item(items, source_type="project", source_id=project.get("id"), title=project.get("title"), content=summarize_project(project), priority=100)
+                add_context_item(
+                    items,
+                    source_type="project",
+                    source_id=project.get("id"),
+                    title=project.get("title"),
+                    content=summarize_project(project),
+                    priority=100,
+                    metadata=source_authority_metadata("projects"),
+                )
             else:
                 warnings.append("No project record found for project_id.")
             add_context_item(
@@ -919,6 +1013,7 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
                 title="Project status summary",
                 content=json_dumps(project_status_summary),
                 priority=98,
+                metadata=source_authority_metadata("projects"),
             )
 
         if "tasks" in sections:
@@ -932,6 +1027,7 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
                     title=task.get("task_name") or task.get("query"),
                     content=f"status={task.get('status')}; query={task.get('query')}; progress={json_dumps(progress)}; error={clean(task.get('error'))}",
                     priority=95 if context_intent == "status_query" else (88 if intent in STATUS_QUERY_INTENTS else 52),
+                    metadata=source_authority_metadata("tasks"),
                 )
 
         if "capabilities" in sections:
@@ -1013,9 +1109,25 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
 
         if "memory" in sections:
             for row in select_recent(conn, "memory_entities", project_id=project_id, limit=8):
-                add_context_item(items, source_type="memory_entity", source_id=row.get("id"), title=row.get("canonical_name") or row.get("entity_type"), content=json_dumps(row)[:1600], priority=80 + text_score(row, terms))
+                add_context_item(
+                    items,
+                    source_type="memory_entity",
+                    source_id=row.get("id"),
+                    title=row.get("canonical_name") or row.get("entity_type"),
+                    content=json_dumps(row)[:1600],
+                    priority=80 + text_score(row, terms),
+                    metadata=source_authority_metadata("memory_entities"),
+                )
             for row in select_recent(conn, "agent_memory_entries", project_id=project_id, where="enabled=1" if "enabled" in table_columns(conn, "agent_memory_entries") else "", limit=8):
-                add_context_item(items, source_type="agent_memory", source_id=row.get("id"), title=row.get("title") or row.get("memory_type"), content=clean(row.get("content") or json_dumps(row))[:1600], priority=78 + text_score(row, terms))
+                add_context_item(
+                    items,
+                    source_type="agent_memory",
+                    source_id=row.get("id"),
+                    title=row.get("title") or row.get("memory_type"),
+                    content=clean(row.get("content") or json_dumps(row))[:1600],
+                    priority=78 + text_score(row, terms),
+                    metadata=source_authority_metadata("agent_memory_entries"),
+                )
 
         if "experiments" in sections:
             for row in select_recent(conn, "experiments", project_id=project_id, limit=15):
@@ -1067,33 +1179,56 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
         if "references" in sections:
             for row in select_recent(conn, "references", project_id=project_id, limit=16):
                 content = f"title={row.get('title')}; year={row.get('year')}; journal={row.get('journal')}; doi={row.get('doi')}; abstract={clean(row.get('abstract'))[:900]}"
-                add_context_item(items, source_type="reference", source_id=row.get("id"), title=row.get("title"), content=content, priority=72 + text_score(row, terms))
+                add_context_item(
+                    items,
+                    source_type="reference",
+                    source_id=row.get("id"),
+                    title=row.get("title"),
+                    content=content,
+                    priority=72 + text_score(row, terms),
+                    metadata=source_authority_metadata("references"),
+                )
 
         if "rag" in sections or "kb" in sections:
-            chunk_columns = table_columns(conn, "reference_chunks")
-            if chunk_columns:
-                chunks = select_recent(
-                    conn,
-                    "reference_chunks",
-                    project_id=project_id,
-                    fields=["id", "reference_id", "chunk_text", "text", "citation_id", "source_kind", "updated_at"],
-                    limit=80,
+            unified = rag_retrieval_service.unified_rag_query(
+                agent_root,
+                {
+                    "project_id": project_id,
+                    "question": user_message,
+                    "retrieval_scope": retrieval_scope,
+                    "mode": "agent_chat" if intent not in {"kb_query"} else "all_project_context",
+                    "limit": 16,
+                },
+            )
+            for result in unified.get("results", [])[:16]:
+                source_type = clean(result.get("source_type"))
+                content = clean(result.get("excerpt") or result.get("text"))
+                if source_type == "kb_entry":
+                    content = f"Knowledge base summary: {content}"
+                elif source_type == "browser_learning":
+                    content = f"Browser learning note, not peer-reviewed evidence: {content}"
+                add_context_item(
+                    items,
+                    source_type=source_type,
+                    source_id=result.get("source_id"),
+                    title=result.get("title"),
+                    content=content,
+                    priority=76 + int(float(result.get("score") or 0) * 100),
+                    metadata=source_authority_metadata(
+                        clean(result.get("source_table")) or source_type,
+                        source_role="derived" if source_type in {"kb_entry", "browser_learning", "brain_note"} else "primary",
+                        extra={
+                            "reference_id": result.get("reference_id"),
+                            "chunk_id": result.get("chunk_id"),
+                            "citation_id": result.get("citation_id"),
+                            "citation_key": result.get("citation_key"),
+                            "evidence_role": result.get("evidence_role"),
+                            "can_support_peer_reviewed_evidence": result.get("can_support_peer_reviewed_evidence"),
+                            "source_db": result.get("source_db"),
+                            "retrieval_service": "unified_rag_query",
+                        },
+                    ),
                 )
-                scored = sorted(chunks, key=lambda row: (text_score(row, terms), clean(row.get("updated_at")), clean(row.get("id"))), reverse=True)
-                for row in scored[:12]:
-                    excerpt = clean(row.get("chunk_text") or row.get("text"))
-                    add_context_item(
-                        items,
-                        source_type="rag_chunk",
-                        source_id=row.get("id"),
-                        title=row.get("citation_id") or row.get("reference_id"),
-                        content=excerpt[:1100],
-                        priority=76 + text_score(row, terms),
-                        metadata={"reference_id": row.get("reference_id"), "citation_id": row.get("citation_id")},
-                    )
-            for row in select_recent(conn, "knowledge_base_entries", project_id=project_id, limit=16):
-                content = clean(row.get("content") or row.get("summary") or json_dumps(row))[:1100]
-                add_context_item(items, source_type="rag_chunk", source_id=row.get("id"), title=row.get("title") or row.get("entry_type"), content=content, priority=76 + text_score(row, terms))
 
     finally:
         conn.close()
@@ -1119,14 +1254,17 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
     sources = [
         {
             "reference_id": item.get("metadata", {}).get("reference_id") or (item.get("source_id") if item.get("source_type") == "reference" else ""),
-            "chunk_id": item.get("source_id") if item.get("source_type") == "rag_chunk" else "",
+            "chunk_id": item.get("metadata", {}).get("chunk_id") or (item.get("source_id") if item.get("source_type") in {"reference_chunk", "kb_entry"} else ""),
             "title": item.get("title"),
             "source_kind": item.get("source_type"),
+            "source_type": item.get("source_type"),
             "citation_id": item.get("metadata", {}).get("citation_id"),
             "excerpt": clean(item.get("content"))[:360],
+            "can_support_peer_reviewed_evidence": item.get("metadata", {}).get("can_support_peer_reviewed_evidence"),
+            "evidence_role": item.get("metadata", {}).get("evidence_role"),
         }
         for item in items
-        if item.get("source_type") in {"reference", "rag_chunk"}
+        if item.get("source_type") in {"reference", "reference_chunk", "kb_entry", "browser_learning", "brain_note"}
     ][:20]
     compiled_context = render_context(items, warnings)
     hash_payload = {
@@ -1151,6 +1289,15 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
         "memory_used": memory_used,
         "sources": sources,
         "task_status": task_status,
+        "memory_backend_registry": memory_backend_registry,
+        "memory_source_of_truth": {
+            "primary_backend": PRIMARY_MEMORY_BACKEND,
+            "primary_classes": [
+                clean(item.get("memory_class"))
+                for item in memory_backend_registry
+                if int(item.get("source_of_truth") or 0) == 1 and clean(item.get("backend_name")) == PRIMARY_MEMORY_BACKEND
+            ],
+        },
         "warnings": warnings,
         "context_hash": context_hash,
     }
