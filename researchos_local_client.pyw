@@ -526,7 +526,7 @@ class ResearchOSClientApp:
                     self.status_model_label.pack_forget()
         self.update_settings_developer_visibility()
         self.status_text.set("开发者模式已开启" if self.developer_mode.get() else "开发者模式已关闭")
-        if not self.developer_mode.get() and self.active_view not in {key for key, _title in USER_NAV}:
+        if not self.developer_mode.get() and self.active_view not in {key for key, _title in PRIMARY_WORKSPACES}:
             self.show_view("overview")
 
     def _small_button(self, parent, text: str, command) -> tk.Button:
@@ -1013,7 +1013,7 @@ class ResearchOSClientApp:
         view.grid_columnconfigure(0, weight=1)
         view.grid_rowconfigure(0, weight=1)
         notebook = ttk.Notebook(view)
-        notebook.grid(row=0, column=0, sticky="nsew")
+        notebook.grid(row=0, column=0, sticky="nsew", padx=26, pady=(22, 24))
 
         literature = ttk.Frame(notebook, style="Workspace.TFrame", padding=(14, 14, 14, 14))
         literature.grid_columnconfigure(0, weight=1)
@@ -1021,9 +1021,11 @@ class ResearchOSClientApp:
         lit_panel = self._panel(literature, "文献采集", "输入 1-3 个关键词，AURA 会调用文献采集能力。")
         lit_panel.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         self.library_keywords = tk.StringVar()
-        ttk.Entry(lit_panel, textvariable=self.library_keywords).pack(side="left", fill="x", expand=True, padx=(0, 8), ipady=7)
-        ttk.Button(lit_panel, text="开始采集", style="Accent.TButton", command=self.run_library_literature_harvest).pack(side="left")
-        ttk.Button(lit_panel, text="刷新", style="Secondary.TButton", command=self.load_literature_tasks).pack(side="left", padx=(8, 0))
+        ttk.Entry(lit_panel, textvariable=self.library_keywords).pack(fill="x", ipady=7, pady=(0, 10))
+        self._action_bar(lit_panel, [
+            ("开始采集", self.run_library_literature_harvest, "primary"),
+            ("刷新进度", self.load_literature_tasks, "secondary"),
+        ]).pack(fill="x")
         lit_list = self._panel(literature, "采集进度")
         lit_list.grid(row=1, column=0, sticky="nsew")
         self.library_literature_box = self._reading_text(lit_list, 18)
@@ -1035,13 +1037,17 @@ class ResearchOSClientApp:
         pdf.grid_rowconfigure(1, weight=1)
         pdf_actions = self._panel(pdf, "添加文献", "导入 PDF 后会登记文件并启动解析。")
         pdf_actions.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        ttk.Button(pdf_actions, text="添加 PDF", style="Accent.TButton", command=self.quick_pdf_import).pack(side="left")
-        ttk.Button(pdf_actions, text="构建知识库", style="Secondary.TButton", command=self.build_kb).pack(side="left", padx=(8, 0))
-        ttk.Button(pdf_actions, text="加载文献列表", style="Secondary.TButton", command=self.load_references).pack(side="left", padx=(8, 0))
-        ttk.Button(pdf_actions, text="查看", style="Secondary.TButton", command=self.show_library_reference_detail).pack(side="left", padx=(8, 0))
-        ttk.Button(pdf_actions, text="重新解析", style="Secondary.TButton", command=self.reparse_selected_library_reference).pack(side="left", padx=(8, 0))
-        ttk.Button(pdf_actions, text="从项目移除", style="Secondary.TButton", command=self.remove_selected_library_reference_from_project).pack(side="left", padx=(8, 0))
-        ttk.Button(pdf_actions, text="删除", style="Secondary.TButton", command=self.delete_selected_library_reference).pack(side="left", padx=(8, 0))
+        self._action_bar(pdf_actions, [
+            ("添加 PDF", self.quick_pdf_import, "primary"),
+            ("构建知识库", self.build_kb, "secondary"),
+            ("刷新列表", self.load_references, "secondary"),
+        ]).pack(fill="x", pady=(0, 8))
+        self._action_bar(pdf_actions, [
+            ("查看选中文献", self.show_library_reference_detail, "secondary"),
+            ("重新解析", self.reparse_selected_library_reference, "secondary"),
+            ("从项目移除", self.remove_selected_library_reference_from_project, "secondary"),
+            ("删除记录", self.delete_selected_library_reference, "secondary"),
+        ]).pack(fill="x")
         pdf_list = self._panel(pdf, "文献列表")
         pdf_list.grid(row=1, column=0, sticky="nsew")
         self.library_reference_list = tk.Listbox(pdf_list, height=9, bg=BG_INPUT, fg=TEXT_1, highlightthickness=1, highlightbackground=BORDER, relief="flat", selectbackground=ACCENT_DIM, selectforeground=TEXT_1, font=("Microsoft YaHei UI", 10))
@@ -1057,12 +1063,13 @@ class ResearchOSClientApp:
         data_actions = self._panel(data, "分析数据", "上传 CSV、Excel 或仪器导出文件。")
         data_actions.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         self.library_data_search = tk.StringVar()
-        ttk.Entry(data_actions, textvariable=self.library_data_search).pack(side="left", fill="x", expand=True, padx=(0, 8), ipady=7)
-        ttk.Button(data_actions, text="上传数据", style="Accent.TButton", command=self.quick_data_upload).pack(side="left")
-        ttk.Button(data_actions, text="搜索", style="Secondary.TButton", command=self.run_library_data_search).pack(side="left", padx=(8, 0))
-        ttk.Button(data_actions, text="查看", style="Secondary.TButton", command=self.show_library_data_detail).pack(side="left", padx=(8, 0))
-        ttk.Button(data_actions, text="从项目移除", style="Secondary.TButton", command=self.hide_selected_library_data).pack(side="left", padx=(8, 0))
-        ttk.Button(data_actions, text="删除记录", style="Secondary.TButton", command=self.hide_selected_library_data).pack(side="left", padx=(8, 0))
+        ttk.Entry(data_actions, textvariable=self.library_data_search).pack(fill="x", ipady=7, pady=(0, 10))
+        self._action_bar(data_actions, [
+            ("上传数据", self.quick_data_upload, "primary"),
+            ("搜索", self.run_library_data_search, "secondary"),
+            ("查看选中项", self.show_library_data_detail, "secondary"),
+            ("从项目移除", self.hide_selected_library_data, "secondary"),
+        ]).pack(fill="x")
         data_list = self._panel(data, "数据与实验对象")
         data_list.grid(row=1, column=0, sticky="nsew")
         self.library_data_list = tk.Listbox(data_list, height=9, bg=BG_INPUT, fg=TEXT_1, highlightthickness=1, highlightbackground=BORDER, relief="flat", selectbackground=ACCENT_DIM, selectforeground=TEXT_1, font=("Microsoft YaHei UI", 10))
@@ -1077,7 +1084,9 @@ class ResearchOSClientApp:
         protocol.grid_rowconfigure(1, weight=1)
         protocol_actions = self._panel(protocol, "方案提取", "粘贴方法学或实验流程，提取实验方案草案。")
         protocol_actions.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        ttk.Button(protocol_actions, text="提取方案", style="Accent.TButton", command=self.run_library_protocol_extract).pack(side="left")
+        self._action_bar(protocol_actions, [
+            ("提取方案", self.run_library_protocol_extract, "primary"),
+        ]).pack(fill="x")
         self.library_protocol_input = self._reading_text(protocol, 7)
         self.library_protocol_input.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         protocol_result = self._panel(protocol, "方案结果")
@@ -1091,7 +1100,9 @@ class ResearchOSClientApp:
         records.grid_rowconfigure(1, weight=1)
         record_actions = self._panel(records, "实验记录", "粘贴今天的实验记录，AURA 会提取结构化记忆。")
         record_actions.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        ttk.Button(record_actions, text="保存记录", style="Accent.TButton", command=self.run_library_experiment_extract).pack(side="left")
+        self._action_bar(record_actions, [
+            ("保存记录", self.run_library_experiment_extract, "primary"),
+        ]).pack(fill="x")
         self.library_record_input = self._reading_text(records, 7)
         self.library_record_input.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         record_result = self._panel(records, "记录结果")
@@ -1101,25 +1112,34 @@ class ResearchOSClientApp:
         notebook.add(records, text="记录")
 
     def _build_tasks_user(self) -> None:
-        view = self._view("tasks_user", "任务", "正在运行、已完成、失败和待确认的科研任务。")
+        view = self._view("tasks_user", "任务流", "正在运行、已完成、失败和待确认的科研任务。")
         view.grid_columnconfigure(0, weight=1)
         view.grid_rowconfigure(1, weight=1)
-        top = self._panel(view, "任务操作")
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        ttk.Button(top, text="刷新任务", style="Accent.TButton", command=self.load_user_tasks_summary).pack(side="left")
-        ttk.Label(top, text="筛选", style="PanelMuted.TLabel").pack(side="left", padx=(14, 6))
-        self.user_task_filter_box = ttk.Combobox(top, textvariable=self.user_task_filter, values=list(TASK_FILTERS.keys()), state="readonly", width=10)
+        top = self._panel(view, "任务操作", "先看任务状态；需要处理选中任务时再使用第二行动作。")
+        top.grid(row=0, column=0, sticky="ew", padx=26, pady=(22, 14))
+
+        filter_row = tk.Frame(top, bg=BG_SURFACE)
+        filter_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(filter_row, text="筛选", style="PanelMuted.TLabel").pack(side="left", padx=(0, 8))
+        self.user_task_filter_box = ttk.Combobox(filter_row, textvariable=self.user_task_filter, values=list(TASK_FILTERS.keys()), state="readonly", width=10)
         self.user_task_filter_box.pack(side="left")
         self.user_task_filter_box.bind("<<ComboboxSelected>>", lambda _event: self.render_user_task_list())
-        ttk.Button(top, text="自动推进任务", style="Secondary.TButton", command=self.run_agent_heartbeat).pack(side="left", padx=(8, 0))
-        ttk.Button(top, text="扫描项目", style="Secondary.TButton", command=self.run_research_watcher).pack(side="left", padx=(8, 0))
-        ttk.Button(top, text="查看结果", style="Secondary.TButton", command=self.show_selected_user_task_detail).pack(side="right", padx=(8, 0))
-        ttk.Button(top, text="继续", style="Secondary.TButton", command=self.continue_selected_user_task).pack(side="right", padx=(8, 0))
-        ttk.Button(top, text="重试", style="Secondary.TButton", command=self.retry_selected_user_task).pack(side="right", padx=(8, 0))
-        ttk.Button(top, text="取消", style="Secondary.TButton", command=self.cancel_selected_user_task).pack(side="right", padx=(8, 0))
-        ttk.Button(top, text="删除记录", style="Secondary.TButton", command=self.hide_selected_user_task).pack(side="right")
+
+        self._action_bar(top, [
+            ("刷新任务", self.load_user_tasks_summary, "primary"),
+            ("自动推进任务", self.run_agent_heartbeat, "secondary"),
+            ("扫描项目", self.run_research_watcher, "secondary"),
+        ]).pack(fill="x", pady=(0, 8))
+        self._action_bar(top, [
+            ("查看结果", self.show_selected_user_task_detail, "secondary"),
+            ("继续", self.continue_selected_user_task, "secondary"),
+            ("重试", self.retry_selected_user_task, "secondary"),
+            ("取消", self.cancel_selected_user_task, "secondary"),
+            ("删除记录", self.hide_selected_user_task, "secondary"),
+        ]).pack(fill="x")
+
         body = ttk.Frame(view, style="Workspace.TFrame")
-        body.grid(row=1, column=0, sticky="nsew")
+        body.grid(row=1, column=0, sticky="nsew", padx=26, pady=(0, 24))
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
@@ -1193,7 +1213,7 @@ class ResearchOSClientApp:
                 if hasattr(self, "status_model_label"):
                     self.status_model_label.pack_forget()
         self.update_settings_developer_visibility()
-        if not self.developer_mode.get() and self.active_view not in {key for key, _title in USER_NAV}:
+        if not self.developer_mode.get() and self.active_view not in {key for key, _title in PRIMARY_WORKSPACES}:
             self.show_view("overview")
 
     def update_settings_developer_visibility(self) -> None:
@@ -2422,27 +2442,28 @@ class ResearchOSClientApp:
         self.rag_answer.pack(fill="both", expand=True)
 
     def _build_agent(self) -> None:
-        view = self._view("agent", "问 AURA", "像聊天一样提出问题；需要启动任务时，AURA 会先说明并等待确认或返回任务卡片。")
-        view.grid_columnconfigure(0, weight=5)
+        view = self._view("agent", "AURA", "提问、发起任务、查看本次回答使用的项目上下文。")
+        view.grid_columnconfigure(0, weight=4)
         view.grid_columnconfigure(1, weight=2)
         view.grid_rowconfigure(0, weight=1)
 
-        chat = tk.Frame(view, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=18, pady=16)
-        chat.grid(row=0, column=0, sticky="nsew", padx=(26, 10), pady=(14, 24))
-        chat.grid_columnconfigure(0, weight=1)
-        chat.grid_rowconfigure(2, weight=1)
+        chat = self._workbench_section(view, "AURA 对话", "直接输入科研问题；需要执行任务时会进入任务流。")
+        chat.grid(row=0, column=0, sticky="nsew", padx=(26, 10), pady=(22, 24))
+        chat_body = tk.Frame(chat, bg=BG_SURFACE)
+        chat_body.pack(fill="both", expand=True)
+        chat_body.grid_columnconfigure(0, weight=1)
+        chat_body.grid_rowconfigure(3, weight=1)
 
-        top = tk.Frame(chat, bg=BG_SURFACE)
+        top = tk.Frame(chat_body, bg=BG_SURFACE)
         top.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        top.grid_columnconfigure(2, weight=1)
-        tk.Label(top, text="AURA Agent", bg=BG_SURFACE, fg=TEXT_1, font=(FONT_UI, 15, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Label(top, text="项目", bg=BG_SURFACE, fg=TEXT_3, font=(FONT_UI, 9)).grid(row=0, column=1, sticky="w", padx=(18, 8))
+        top.grid_columnconfigure(1, weight=1)
+        tk.Label(top, text="项目", bg=BG_SURFACE, fg=TEXT_3, font=(FONT_UI, 9)).grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.agent_project_box = ttk.Combobox(top, textvariable=self.agent_project, values=[], state="readonly", width=28)
-        self.agent_project_box.grid(row=0, column=2, sticky="w")
-        self._action_button(top, "上下文", self.toggle_agent_context_panel).grid(row=0, column=3, sticky="e", padx=(8, 0))
-        self._action_button(top, "清空", self.clear_agent_chat).grid(row=0, column=4, sticky="e", padx=(8, 0))
+        self.agent_project_box.grid(row=0, column=1, sticky="w")
+        self._action_button(top, "上下文", self.toggle_agent_context_panel).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        self._action_button(top, "清空", self.clear_agent_chat).grid(row=0, column=3, sticky="e", padx=(8, 0))
 
-        shortcut = tk.Frame(chat, bg=BG_SURFACE)
+        shortcut = tk.Frame(chat_body, bg=BG_SURFACE)
         shortcut.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         shortcut_prompts = [
             ("采文献", "请围绕当前项目关键词采集开放文献，并整理证据链。"),
@@ -2450,18 +2471,17 @@ class ResearchOSClientApp:
             ("查资料库", "请检索当前项目资料库并总结可用证据。"),
             ("写进展", "请根据当前项目记忆生成科研进展汇报。"),
         ]
-        for label, prompt in shortcut_prompts:
-            self._action_button(shortcut, label, lambda value=prompt: self.insert_agent_prompt(value)).pack(side="left", padx=(0, 8))
+        self._action_bar(shortcut, [(label, lambda value=prompt: self.insert_agent_prompt(value), "secondary") for label, prompt in shortcut_prompts]).pack(fill="x")
 
-        self.agent_transcript = self._reading_text(chat, 21)
-        self.agent_transcript.grid(row=2, column=0, sticky="nsew", pady=(0, 12))
+        self.agent_transcript = self._reading_text(chat_body, 21)
+        self.agent_transcript.grid(row=3, column=0, sticky="nsew", pady=(0, 12))
         self.agent_transcript.insert("1.0", "AURA 已准备好。\n\n你可以直接打招呼、提问，或让 AURA 帮你采集文献、分析数据、整理实验记录。\n\n")
 
-        self.agent_inline_actions = tk.Frame(chat, bg=BG_SURFACE)
-        self.agent_inline_actions.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        self.agent_inline_actions = tk.Frame(chat_body, bg=BG_SURFACE)
+        self.agent_inline_actions.grid(row=4, column=0, sticky="ew", pady=(0, 8))
 
-        composer = tk.Frame(chat, bg=BG_INPUT, highlightbackground=BORDER, highlightthickness=1, padx=10, pady=10)
-        composer.grid(row=4, column=0, sticky="ew")
+        composer = tk.Frame(chat_body, bg=BG_INPUT, highlightbackground=BORDER, highlightthickness=1, padx=10, pady=10)
+        composer.grid(row=5, column=0, sticky="ew")
         composer.grid_columnconfigure(0, weight=1)
         self.agent_message = self._reading_text(composer, 4)
         self.agent_message.grid(row=0, column=0, sticky="ew", padx=(0, 8))
@@ -2469,25 +2489,25 @@ class ResearchOSClientApp:
         self._action_button(composer, "上传", self.chat_upload_file).grid(row=0, column=1, sticky="se", padx=(0, 8))
         self._action_button(composer, "发送", self.send_agent_message, kind="primary").grid(row=0, column=2, sticky="se")
 
-        right = tk.Frame(view, bg=BG_SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=16, pady=16)
-        right.grid(row=0, column=1, sticky="nsew", padx=(10, 26), pady=(14, 24))
-        right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(3, weight=1)
-        tk.Label(right, text="上下文", bg=BG_SURFACE, fg=TEXT_1, anchor="w", font=(FONT_UI, 13, "bold")).grid(row=0, column=0, sticky="ew")
-        tk.Label(right, text="本次回答使用的来源、任务和项目摘要。", bg=BG_SURFACE, fg=TEXT_3, anchor="w", justify="left", wraplength=320, font=(FONT_UI, 9)).grid(row=1, column=0, sticky="ew", pady=(2, 12))
+        right = self._workbench_section(view, "上下文", "本次回答使用的来源、任务和项目摘要。")
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 26), pady=(22, 24))
+        right_body = tk.Frame(right, bg=BG_SURFACE)
+        right_body.pack(fill="both", expand=True)
+        right_body.grid_columnconfigure(0, weight=1)
+        right_body.grid_rowconfigure(2, weight=1)
         self.agent_context_panel = right
-        self.agent_actions_frame = tk.Frame(right, bg=BG_SURFACE)
-        self.agent_actions_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        context_state = tk.Frame(right, bg=BG_SURFACE)
-        context_state.grid(row=3, column=0, sticky="new", pady=(0, 10))
+        self.agent_actions_frame = tk.Frame(right_body, bg=BG_SURFACE)
+        self.agent_actions_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        context_state = tk.Frame(right_body, bg=BG_SURFACE)
+        context_state.grid(row=1, column=0, sticky="new", pady=(0, 10))
         self.agent_workspace_label = tk.Label(context_state, text="项目：未选择", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=(FONT_UI, 9))
         self.agent_workspace_label.pack(fill="x", pady=(0, 6))
         self.agent_evidence_label = tk.Label(context_state, text="资料：等待检索", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=(FONT_UI, 9))
         self.agent_evidence_label.pack(fill="x", pady=(0, 6))
         self.agent_task_label = tk.Label(context_state, text="任务：暂无", bg=BG_ELEVATED, fg=TEXT_2, anchor="w", padx=12, pady=8, font=(FONT_UI, 9))
         self.agent_task_label.pack(fill="x")
-        self.agent_detail = self._reading_text(right, 18)
-        self.agent_detail.grid(row=4, column=0, sticky="nsew")
+        self.agent_detail = self._reading_text(right_body, 18)
+        self.agent_detail.grid(row=2, column=0, sticky="nsew")
         self.agent_answer = self.agent_detail
         self.agent_context_panel.grid_remove()
 
@@ -2548,19 +2568,21 @@ class ResearchOSClientApp:
         self.feed_detail.insert("1.0", f"点击“扫描当前项目”，{APP_NAME} 会读取 workspace-state、文献、任务、记忆和 KB 状态，生成主动建议。")
 
     def _build_memory(self) -> None:
-        view = self._view("memory", "Memory", "Build Research Memory Context and view Agent Memory.")
+        view = self._view("memory", "项目记忆", "整理当前项目的背景、证据、实验记录和下一步上下文。")
         view.grid_columnconfigure(0, weight=2)
         view.grid_columnconfigure(1, weight=3)
         view.grid_rowconfigure(0, weight=1)
-        left = self._panel(view, "Query")
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left = self._panel(view, "生成上下文", "选择项目并输入问题，AURA 会整理可用于回答的记忆材料。")
+        left.grid(row=0, column=0, sticky="nsew", padx=(26, 10), pady=(22, 24))
         self.memory_project_box = self._combo(left, "项目", self.memory_project)
         self.memory_query = self._text(left, 8)
         self.memory_query.pack(fill="both", expand=True, pady=(0, 10))
-        ttk.Button(left, text="Build Memory Context", style="Accent.TButton", command=self.build_memory_context).pack(fill="x", pady=(0, 8))
-        ttk.Button(left, text="Load Agent Memory", style="Secondary.TButton", command=self.load_agent_memory).pack(fill="x")
-        right = self._panel(view, "Memory Context")
-        right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self._action_bar(left, [
+            ("生成上下文", self.build_memory_context, "primary"),
+            ("加载项目记忆", self.load_agent_memory, "secondary"),
+        ]).pack(fill="x")
+        right = self._panel(view, "记忆内容", "默认展示面向科研工作的摘要；原始记录仍由后端保存。")
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 26), pady=(22, 24))
         self.memory_result = self._text(right, 24)
         self.memory_result.pack(fill="both", expand=True)
 
@@ -2628,7 +2650,7 @@ class ResearchOSClientApp:
         self.api_response.pack(fill="both", expand=True)
 
     def show_view(self, key: str) -> None:
-        aura_home_allowed = {item[0] for item in USER_NAV} | {"data", "knowledge"}
+        aura_home_allowed = {item[0] for item in PRIMARY_WORKSPACES} | {"data", "knowledge"}
         if not self.developer_mode.get() and key not in aura_home_allowed:
             key = "settings"
         for name, frame in self.views.items():
