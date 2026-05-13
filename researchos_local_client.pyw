@@ -165,6 +165,44 @@ TASK_FILTERS = {
     "失败": "failed",
 }
 
+class WorkbenchTheme:
+    CANVAS = "#010102"
+    SURFACE_1 = "#0f1011"
+    SURFACE_2 = "#141516"
+    SURFACE_3 = "#18191a"
+    HAIRLINE = "#23252a"
+    HAIRLINE_STRONG = "#34343a"
+    INK = "#f7f8f8"
+    MUTED = "#d0d6e0"
+    SUBTLE = "#8a8f98"
+    ACCENT = "#5e6ad2"
+    ACCENT_HOVER = "#828fff"
+    SUCCESS = "#27a644"
+    WARNING = "#ffc533"
+    DANGER = "#ff6161"
+    PANEL_RADIUS_NOTE = "8-12px"
+
+
+PRIMARY_WORKSPACES = [
+    ("overview", "总览"),
+    ("tasks_user", "任务流"),
+    ("library_user", "资料库"),
+    ("agent", "AURA"),
+    ("memory", "项目记忆"),
+]
+
+
+DEVELOPER_WORKSPACES = [
+    ("skills", "技能注册表"),
+    ("projects", "项目/文件调试"),
+    ("data", "数据调试"),
+    ("experiments", "实验调试"),
+    ("samples", "样品调试"),
+    ("feed", "任务原始状态"),
+    ("functions", "开发者控制台"),
+    ("api", "API 调试"),
+]
+
 USER_FEATURE_MAP = {
     "问 AURA": "首页",
     "项目管理": "工作区",

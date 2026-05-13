@@ -42,6 +42,31 @@ class LocalClientBootTests(unittest.TestCase):
 
         self.assertNotIn('/api/agents/coordinator/run"', source)
 
+    def test_workbench_theme_exposes_linear_surface_tokens(self) -> None:
+        client_module = load_client_module()
+
+        self.assertEqual(client_module.WorkbenchTheme.CANVAS, "#010102")
+        self.assertEqual(client_module.WorkbenchTheme.ACCENT, "#5e6ad2")
+        self.assertEqual(client_module.WorkbenchTheme.PANEL_RADIUS_NOTE, "8-12px")
+
+    def test_primary_workspace_keys_are_low_density_user_workflows(self) -> None:
+        client_module = load_client_module()
+
+        self.assertEqual(
+            [key for key, _label in client_module.PRIMARY_WORKSPACES],
+            ["overview", "tasks_user", "library_user", "agent", "memory"],
+        )
+
+    def test_developer_workspace_keys_are_separate_from_primary_workflows(self) -> None:
+        client_module = load_client_module()
+
+        primary_keys = {key for key, _label in client_module.PRIMARY_WORKSPACES}
+        developer_keys = {key for key, _label in client_module.DEVELOPER_WORKSPACES}
+
+        self.assertFalse(primary_keys & developer_keys)
+        self.assertIn("skills", developer_keys)
+        self.assertIn("api", developer_keys)
+
 
 if __name__ == "__main__":
     unittest.main()
