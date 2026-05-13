@@ -10,6 +10,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.superpowers/
 
 # Local databases, logs, and generated runtime state
 *.sqlite
