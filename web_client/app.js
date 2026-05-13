@@ -1,204 +1,105 @@
-const state = {
-  projects: [],
-  activeProjectId: "",
-  conversationId: localStorage.getItem("auraConversationId") || "",
+import { getHealth, getProjects, getResolverHealth, getRuntimeStatus } from "./api.js";
+import { appState, setActiveProjectId, setCurrentView, setHealth, setProjects, setResolverHealth } from "./state.js";
+import { renderProjectSwitcher } from "./components/project_switcher.js";
+import { renderChatView } from "./views/chat.js";
+import { renderTaskLifecycleView } from "./views/task_lifecycle.js";
+import { renderBrainView } from "./views/brain.js";
+import { renderLibraryView } from "./views/library.js";
+import { renderSkillsView } from "./views/skills.js";
+import { renderRunsView } from "./views/runs.js";
+import { renderSettingsView } from "./views/settings.js";
+
+const viewRoot = document.querySelector("#viewRoot");
+const projectSwitcher = document.querySelector("#projectSwitcher");
+const backendDot = document.querySelector("#backendDot");
+const backendText = document.querySelector("#backendText");
+const views = {
+  chat: renderChatView,
+  task_lifecycle: renderTaskLifecycleView,
+  brain: renderBrainView,
+  library: renderLibraryView,
+  skills: renderSkillsView,
+  runs: renderRunsView,
+  settings: renderSettingsView,
 };
 
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => Array.from(document.querySelectorAll(selector));
-
-async function api(path, options = {}) {
-  const response = await fetch(`/api/backend${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+function updateNavigation() {
+  document.querySelectorAll("[data-view-target]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.viewTarget === appState.currentView);
   });
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    throw new Error(payload.error || `HTTP ${response.status}`);
-  }
-  return payload;
 }
 
-function clean(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+function updatePill(id, label, tone) {
+  const pill = document.querySelector(`#${id}`);
+  if (!pill) return;
+  pill.className = `status-pill ${tone}`;
+  pill.textContent = label;
 }
 
-function setRoute(route) {
-  $$(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.route === route));
-  $$(".view").forEach((view) => view.classList.toggle("is-active", view.dataset.view === route));
-  if (route === "tasks") loadTasks();
-  if (route === "library") loadLibrary();
-  if (route === "memory") loadMemory();
-  if (route === "settings") loadStatus();
+function updateShellStatus() {
+  const connected = Boolean(appState.health?.ok);
+  backendDot.classList.toggle("ok", connected);
+  backendText.textContent = connected ? "Connected" : "Backend unavailable";
+
+  const resolverDisabled = appState.resolverHealth?.error === "dual_agent_api_disabled";
+  const resolverOk = Boolean(appState.resolverHealth?.ok);
+  updatePill(
+    "dualAgentPill",
+    resolverDisabled ? "Dual Agent disabled" : resolverOk ? "Dual Agent ready" : "Dual Agent unavailable",
+    resolverDisabled ? "muted" : resolverOk ? "success" : "warning",
+  );
+  updatePill("runtimePill", connected ? "Runtime online" : "Runtime offline", connected ? "success" : "danger");
 }
 
-function addMessage(role, text) {
-  const node = document.createElement("div");
-  node.className = `message ${role}`;
-  node.textContent = text;
-  $("#chatLog").appendChild(node);
-  $("#chatLog").scrollTop = $("#chatLog").scrollHeight;
+async function refreshProjects() {
+  const result = await getProjects();
+  const projects = result.ok ? result.data.projects || [] : [];
+  setProjects(projects);
+  projectSwitcher.innerHTML = renderProjectSwitcher(appState.cachedProjects, appState.activeProjectId);
 }
 
-function row(title, subtitle, meta = "") {
-  const node = document.createElement("article");
-  node.className = "row";
-  node.innerHTML = `
-    <strong></strong>
-    <span></span>
-    ${meta ? '<span class="meta"></span>' : ""}
-  `;
-  node.querySelector("strong").textContent = title;
-  node.querySelector("span").textContent = subtitle;
-  const metaNode = node.querySelector(".meta");
-  if (metaNode) metaNode.textContent = meta;
-  return node;
+async function refreshShell() {
+  const [health, runtime, resolver] = await Promise.all([getHealth(), getRuntimeStatus(appState.activeProjectId), getResolverHealth()]);
+  setHealth(health.ok ? { ok: true, ...health.data } : { ok: false, error: health.error });
+  appState.dualAgentEnabled = resolver.ok;
+  appState.runtimeStatus = runtime.ok ? runtime.data : null;
+  setResolverHealth(resolver.ok ? { ok: true, ...resolver.data } : { ok: false, error: resolver.error, status: resolver.status });
+  updateShellStatus();
 }
 
-function renderEmpty(target, title, subtitle) {
-  target.replaceChildren(row(title, subtitle));
+async function renderCurrentView() {
+  updateNavigation();
+  const render = views[appState.currentView] || views.chat;
+  viewRoot.setAttribute("aria-busy", "true");
+  await render({ root: viewRoot, refreshShell, refreshProjects, renderCurrentView });
+  viewRoot.setAttribute("aria-busy", "false");
 }
 
-async function loadStatus() {
-  const dot = $("#statusDot");
-  const label = $("#statusText");
-  try {
-    const health = await api("/health");
-    dot.classList.add("ok");
-    label.textContent = "已连接";
-    $("#statusGrid").replaceChildren(
-      row("本地服务", "ResearchOS API 正常响应", clean(health.status, "ok")),
-      row("数据目录", clean(health.agent_root || health.state_db || "已配置")),
-    );
-  } catch (error) {
-    dot.classList.remove("ok");
-    label.textContent = "未连接";
-    $("#statusGrid").replaceChildren(row("连接失败", error.message));
-  }
-}
-
-async function loadProjects() {
-  try {
-    const payload = await api("/research-os/projects");
-    state.projects = payload.projects || [];
-    state.activeProjectId = clean(state.projects[0]?.id || state.projects[0]?.project_id);
-    $("#projectHint").textContent = state.projects[0]
-      ? `当前项目：${clean(state.projects[0].title || state.projects[0].name, "未命名项目")}`
-      : "还没有项目，AURA 会先按你的问题工作";
-  } catch {
-    $("#projectHint").textContent = "后端连接中";
-  }
-}
-
-async function loadTasks() {
-  const target = $("#taskList");
-  try {
-    const payload = await api(`/research-os/tasks${state.activeProjectId ? `?project_id=${encodeURIComponent(state.activeProjectId)}` : ""}`);
-    const tasks = payload.tasks || payload.agent_tasks || [];
-    if (!tasks.length) {
-      renderEmpty(target, "暂无任务", "发送一个需要执行的科研请求后，任务会出现在这里。");
-      return;
-    }
-    target.replaceChildren(
-      ...tasks.slice(0, 18).map((task) =>
-        row(
-          clean(task.title || task.type || task.task_type, "科研任务"),
-          clean(task.summary || task.message || task.current_stage || task.task_id, "等待后端更新"),
-          clean(task.status, "pending"),
-        ),
-      ),
-    );
-  } catch (error) {
-    renderEmpty(target, "任务读取失败", error.message);
-  }
-}
-
-async function loadLibrary() {
-  const target = $("#libraryList");
-  try {
-    const payload = await api(`/research-os/references${state.activeProjectId ? `?project_id=${encodeURIComponent(state.activeProjectId)}` : ""}`);
-    const refs = payload.references || [];
-    if (!refs.length) {
-      renderEmpty(target, "资料库为空", "导入 PDF 或启动文献采集后，文献会出现在这里。");
-      return;
-    }
-    target.replaceChildren(
-      ...refs.slice(0, 18).map((ref) =>
-        row(
-          clean(ref.title || ref.name, "未命名文献"),
-          clean(ref.authors || ref.source || ref.path, "未记录来源"),
-          clean(ref.status || ref.provider),
-        ),
-      ),
-    );
-  } catch (error) {
-    renderEmpty(target, "资料库读取失败", error.message);
-  }
-}
-
-async function loadMemory() {
-  const target = $("#memoryText");
-  if (!state.activeProjectId) {
-    target.textContent = "还没有选中的项目。";
-    return;
-  }
-  try {
-    const payload = await api(`/research-os/memory/context?project_id=${encodeURIComponent(state.activeProjectId)}&query=${encodeURIComponent("当前项目摘要")}`);
-    target.textContent = clean(payload.summary || payload.context || payload.memory_context || JSON.stringify(payload, null, 2), "暂无项目记忆。");
-  } catch (error) {
-    target.textContent = `项目记忆读取失败：${error.message}`;
-  }
-}
-
-async function sendPrompt(source) {
-  const prompt = source.value.trim();
-  if (!prompt) return;
-  source.value = "";
-  addMessage("user", prompt);
-  setRoute("home");
-  try {
-    const payload = await api("/research-os/agent/chat", {
-      method: "POST",
-      body: JSON.stringify({
-        message: prompt,
-        project_id: state.activeProjectId,
-        conversation_id: state.conversationId,
-      }),
-    });
-    if (payload.conversation_id) {
-      state.conversationId = payload.conversation_id;
-      localStorage.setItem("auraConversationId", state.conversationId);
-    }
-    addMessage("assistant", clean(payload.answer || payload.summary || payload.message, "AURA 已返回结果。"));
-    loadTasks();
-  } catch (error) {
-    addMessage("assistant", `请求失败：${error.message}`);
-  }
-}
-
-function bindEvents() {
-  $$("[data-route]").forEach((item) => item.addEventListener("click", () => setRoute(item.dataset.route)));
-  $("#sendHome").addEventListener("click", () => sendPrompt($("#homePrompt")));
-  $("#homePrompt").addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) sendPrompt($("#homePrompt"));
+function bindShellEvents() {
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-view-target]");
+    if (!button) return;
+    setCurrentView(button.dataset.viewTarget);
+    await renderCurrentView();
   });
-  $("#refreshTasks").addEventListener("click", loadTasks);
-  $("#refreshLibrary").addEventListener("click", loadLibrary);
-  $("#refreshMemory").addEventListener("click", loadMemory);
-  $("#refreshStatus").addEventListener("click", loadStatus);
+
+  projectSwitcher.addEventListener("change", async (event) => {
+    if (event.target.matches("[data-project-select]")) {
+      setActiveProjectId(event.target.value);
+      await refreshShell();
+      await renderCurrentView();
+    }
+  });
+
+  window.addEventListener("researchos:refresh-view", renderCurrentView);
+  window.addEventListener("researchos:refresh-shell", refreshShell);
 }
 
 async function boot() {
-  bindEvents();
-  addMessage("assistant", "AURA 已准备好。首页只保留对话框，其他内容在左侧分区查看。");
-  await loadStatus();
-  await loadProjects();
+  bindShellEvents();
+  await refreshProjects();
+  await refreshShell();
+  await renderCurrentView();
 }
 
 boot();

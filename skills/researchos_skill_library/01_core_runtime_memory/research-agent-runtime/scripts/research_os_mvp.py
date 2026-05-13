@@ -12173,6 +12173,21 @@ PROFILE_UPDATE_INTENTS = {"user_profile_update", "project_profile_update", "rese
 PROFILE_QUERY_INTENTS = {"user_profile_query", "project_profile_query"}
 
 
+def is_user_profile_query_message(message: str) -> bool:
+    lower = clean(message).lower()
+    return any(term in lower for term in ["我叫什么", "我的名字是什么", "我是谁"])
+
+
+def is_project_profile_query_message(message: str) -> bool:
+    lower = clean(message).lower()
+    return any(term in lower for term in ["我现在做什么课题", "我做什么课题", "当前课题是什么", "我的课题是什么"])
+
+
+def is_current_topic_intro_request(message: str) -> bool:
+    lower = clean(message).lower()
+    return any(term in lower for term in ["介绍一下这个课题", "介绍这个课题", "讲讲这个课题", "这个课题是什么"])
+
+
 def extract_profile_update(message: str) -> dict[str, Any]:
     text = clean(message)
     if not text:
@@ -13087,6 +13102,12 @@ def infer_agent_intent(message: str, previous_intent: str = "") -> str:
         return "paper_recommendation"
     if canonical_intent in {"paper_request_list", "paper_request_process"}:
         return canonical_intent
+    if is_user_profile_query_message(message):
+        return "user_profile_query"
+    if is_project_profile_query_message(message):
+        return "project_profile_query"
+    if is_current_topic_intro_request(message):
+        return "research_advice"
     gate = classify_memory_candidate(message, {})
     if gate["memory_layer"] == "user_profile" and gate["should_save"]:
         return "user_profile_update"
@@ -13139,11 +13160,11 @@ def infer_agent_intent(message: str, previous_intent: str = "") -> str:
     ]
     if any(term in lower for term in learning_terms) or any(term in clean(message) for term in ["学到了什么", "学到什么", "已经解析", "已经入库", "总结已解析", "知识库新增", "知识库学到"]):
         return "literature_learning_summary"
-    if any(term in lower for term in ["我叫什么", "我的名字是什么", "我是谁"]):
+    if is_user_profile_query_message(message):
         return "user_profile_query"
-    if any(term in lower for term in ["我现在做什么课题", "我做什么课题", "当前课题是什么", "我的课题是什么"]):
+    if is_project_profile_query_message(message):
         return "project_profile_query"
-    if any(term in lower for term in ["介绍一下这个课题", "介绍这个课题", "讲讲这个课题", "这个课题是什么"]):
+    if is_current_topic_intro_request(message):
         return "research_advice"
     if is_profile_update_message(message):
         profile = extract_profile_update(message)
@@ -16189,20 +16210,27 @@ def get_researchos_capability_status(agent_root: Path, project_id: str = "") -> 
         else:
             set_detail("response_formatter", "partial", ["formatters exist", "agent_chat wiring not fully confirmed"])
 
-        client_path = WORKSPACE_ROOT / "researchos_local_client.pyw"
-        if client_path.exists():
+        electron_path = WORKSPACE_ROOT / "electron" / "main.js"
+        web_client_path = WORKSPACE_ROOT / "web_client" / "index.html"
+        api_client_path = WORKSPACE_ROOT / "web_client" / "api.js"
+        if electron_path.exists() and web_client_path.exists():
             try:
-                client_text = client_path.read_text(encoding="utf-8", errors="ignore")
+                electron_text = electron_path.read_text(encoding="utf-8", errors="ignore")
+                web_text = web_client_path.read_text(encoding="utf-8", errors="ignore")
+                api_text = api_client_path.read_text(encoding="utf-8", errors="ignore") if api_client_path.exists() else ""
             except Exception:
-                client_text = ""
-            client_needles = ["send_agent_message", "refresh_workspace_state", "load_skills", "load_agent_tasks"]
-            if all(needle in client_text for needle in client_needles):
-                set_detail("local_client_ui", "real", ["researchos_local_client.pyw exists", "workspace, skills, tasks and chat UI hooks found"])
+                electron_text = ""
+                web_text = ""
+                api_text = ""
+            client_needles = ["api/backend", "BrowserWindow", "web_client", "runCoordinator", "sendLegacyChat", "getSkillCatalog", "getSkillRuns"]
+            combined = "\n".join([electron_text, web_text, api_text])
+            if all(needle in combined for needle in client_needles):
+                set_detail("local_client_ui", "real", ["Electron client exists", "web_client shell and API hooks found"])
             else:
-                set_detail("local_client_ui", "partial", ["researchos_local_client.pyw exists", "some expected UI hooks missing"])
+                set_detail("local_client_ui", "partial", ["Electron/web client exists", "some expected UI hooks missing"])
                 _append_gap(status, "Local client exists but some UI integration hooks could not be confirmed.", "Keep chat, task, skill and workspace-state panels wired to backend APIs.")
         else:
-            set_detail("local_client_ui", "missing", ["researchos_local_client.pyw missing"])
+            set_detail("local_client_ui", "missing", ["Electron/web_client files missing"])
 
         if status.get("artifact_store") == "missing":
             _append_gap(status, "Artifact/report/weekly digest storage is not fully available.", "Preserve generated reports and digest outputs through the artifact store.")
@@ -16247,7 +16275,7 @@ def get_demo_runtime_status(agent_root: Path | str, project_id: str = "") -> dic
         "project_memory": "research_os_mvp agent memory",
         "artifacts": "research_os_mvp artifact store",
         "research_feed": "research_os_mvp agent inbox/feed",
-        "local_client": "researchos_local_client.pyw -> /research-os/*",
+        "local_client": "Electron + web_client -> /api/backend/*",
     }
     disconnected_modules = [
         "call_tool:pdf_parser",
@@ -16271,9 +16299,9 @@ def get_demo_runtime_status(agent_root: Path | str, project_id: str = "") -> dic
         "local_client",
     ]
     notes = [
-        "Default demo routes use research-agent-runtime and researchos_local_client.pyw.",
+        "Default demo routes use research-agent-runtime and the Electron web_client.",
         "backend/researchos scaffold is disabled from default API routes unless RESEARCHOS_DUAL_AGENT_API_ENABLED is explicitly enabled.",
-        "Local client chat uses /research-os/agent/chat by default; scaffold chat routing requires developer mode plus RESEARCHOS_CLIENT_ENABLE_SCAFFOLD_CHAT.",
+        "Local client chat uses /api/agents/coordinator/run first when enabled, then falls back to /research-os/agent/chat.",
     ]
     status = {
         "active_runtime": "research-agent-runtime",

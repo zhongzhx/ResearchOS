@@ -185,7 +185,7 @@ function startWebServer() {
 }
 
 async function createWindow() {
-  nativeTheme.themeSource = "dark";
+  nativeTheme.themeSource = "light";
   await startBackend();
   const webPort = await startWebServer();
   mainWindow = new BrowserWindow({
@@ -193,7 +193,7 @@ async function createWindow() {
     height: 920,
     minWidth: 980,
     minHeight: 680,
-    backgroundColor: "#050506",
+    backgroundColor: "#f7f8fa",
     title: "AURA Research",
     autoHideMenuBar: true,
     webPreferences: {

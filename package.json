@@ -6,7 +6,8 @@
   "main": "electron/main.js",
   "scripts": {
     "client:electron": "electron .",
-    "client:electron:smoke": "electron . --smoke-test"
+    "client:electron:smoke": "electron . --smoke-test",
+    "client:check": "py scripts/check_web_client.py"
   },
   "devDependencies": {
     "electron": "^39.8.10"

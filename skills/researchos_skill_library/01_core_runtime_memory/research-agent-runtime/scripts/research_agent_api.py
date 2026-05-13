@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -34,6 +35,8 @@ if explicit_env:
     load_env_file(Path(explicit_env))
 def resolve_workspace_root(script_path: Path) -> Path:
     for candidate in [script_path.parent, *script_path.parents]:
+        if (candidate / "backend").exists() and (candidate / "skills" / "researchos_skill_library").exists():
+            return candidate
         if (candidate / "researchos_local_client.pyw").exists() and (candidate / "skills" / "researchos_skill_library").exists():
             return candidate
     return script_path.parents[2]
@@ -94,6 +97,23 @@ CONFIG: RuntimeConfig
 SCHEDULER_THREAD: threading.Thread | None = None
 SCHEDULER_STOP = threading.Event()
 SCHEDULER_LAST_RUN: dict[str, Any] = {"status": "not_started", "last_run_at": "", "last_error": ""}
+MAX_JSON_BODY_BYTES = 1024 * 1024
+SECRET_ERROR_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|cookie|authorization)(\s*[:=]\s*)([^\s,;]+)")
+WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:\\[^\s\"']+")
+POSIX_PATH_RE = re.compile(r"/(?:Users|home|var|tmp|mnt|etc|opt|Volumes)/[^\s\"']+")
+
+DUAL_AGENT_GET_PATHS = {
+    "/api/demo/dual-agent",
+    "/api/self-evolution/pending-skills",
+    "/api/skills/resolver/check",
+    "/api/skills/catalog",
+    "/api/skills/pipelines",
+}
+
+DUAL_AGENT_POST_PATHS = {
+    "/api/agents/coordinator/run",
+    "/api/skills/route",
+}
 
 
 def api_log_path() -> Path:
@@ -116,6 +136,22 @@ def scheduler_enabled() -> bool:
 
 def dual_agent_api_enabled() -> bool:
     return os.environ.get("RESEARCHOS_DUAL_AGENT_API_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_dual_agent_get_path(path: str) -> bool:
+    return path in DUAL_AGENT_GET_PATHS
+
+
+def is_dual_agent_post_path(path: str) -> bool:
+    return (
+        path in DUAL_AGENT_POST_PATHS
+        or (path.startswith("/api/brain/skillrun/") and path.endswith("/process"))
+        or (path.startswith("/api/self-evolution/skills/") and (path.endswith("/activate") or path.endswith("/reject")))
+    )
+
+
+def dual_agent_disabled_response(handler: BaseHTTPRequestHandler) -> None:
+    json_response(handler, 503, {"ok": False, "error": "dual_agent_api_disabled"})
 
 
 def run_dual_agent_api(callback: Any) -> Any:
@@ -168,25 +204,77 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[st
     handler.wfile.write(body)
 
 
+def safe_error_message(exc: Exception) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    text = SECRET_ERROR_RE.sub(r"\1\2[redacted]", text)
+    text = WINDOWS_PATH_RE.sub("[path]", text)
+    text = POSIX_PATH_RE.sub("[path]", text)
+    if len(text) > 220:
+        text = f"{text[:217]}..."
+    return text
+
+
 def handle_error(handler: BaseHTTPRequestHandler, exc: Exception) -> None:
     try:
         api_log(f"{handler.command} {handler.path} failed: {exc}\n{traceback.format_exc()}")
     except Exception:
         pass
+    message = safe_error_message(exc)
     if isinstance(exc, KeyError):
-        json_response(handler, 404, {"error": str(exc).strip("'")})
+        json_response(handler, 404, {"ok": False, "error": message.strip("'")})
     elif isinstance(exc, (ValueError, FileNotFoundError, json.JSONDecodeError)):
-        json_response(handler, 400, {"error": str(exc)})
+        json_response(handler, 400, {"ok": False, "error": message})
     else:
-        json_response(handler, 500, {"error": str(exc)})
+        json_response(handler, 500, {"ok": False, "error": message})
 
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", "0") or "0")
     if not length:
         return {}
+    if length > MAX_JSON_BODY_BYTES:
+        raise ValueError("request body too large")
     body = handler.rfile.read(length).decode("utf-8")
     return json.loads(body or "{}")
+
+
+def normalize_dual_agent_result(payload: dict[str, Any]) -> dict[str, Any]:
+    source = payload.get("details") if isinstance(payload.get("details"), dict) else payload
+    execution_result = source.get("execution_result") or payload.get("execution_result") or {}
+    memory_update = (
+        source.get("memory_update")
+        or source.get("memory_commit")
+        or source.get("brain_memory_write")
+        or payload.get("memory_update")
+        or {}
+    )
+    post_task = source.get("post_task_processing") or payload.get("post_task_processing") or {}
+    pending_skill = source.get("pending_skill") or post_task.get("pending_skill") or payload.get("pending_skill")
+    memory_pages = (
+        source.get("memory_pages")
+        or payload.get("memory_pages")
+        or memory_update.get("promoted_pages")
+        or memory_update.get("written")
+        or []
+    )
+    handoff = source.get("handoff") or source.get("handoff_summary") or payload.get("handoff") or payload.get("summary")
+    normalized = {
+        "ok": bool(source.get("ok", payload.get("ok", execution_result.get("status") not in {"failed", "error"}))),
+        "task_spec": source.get("task_spec") or payload.get("task_spec"),
+        "execution_result": execution_result or None,
+        "brain_decision": source.get("brain_decision") or payload.get("brain_decision"),
+        "validation_report": source.get("validation_report") or payload.get("validation_report"),
+        "promotion_decision": source.get("promotion_decision") or payload.get("promotion_decision"),
+        "memory_update": memory_update or None,
+        "memory_pages": memory_pages if isinstance(memory_pages, list) else [],
+        "pending_skill": pending_skill,
+        "resolver_health": source.get("resolver_health") or payload.get("resolver_health"),
+        "handoff": handoff,
+        "summary": source.get("summary") or payload.get("summary") or handoff,
+    }
+    for key, value in payload.items():
+        normalized.setdefault(key, value)
+    return normalized
 
 
 def run_job_background(payload: dict[str, Any], job_id: str) -> None:
@@ -269,12 +357,17 @@ class Handler(BaseHTTPRequestHandler):
                 handle_error(self, exc)
             return
 
+        if not dual_agent_api_enabled() and is_dual_agent_get_path(path):
+            dual_agent_disabled_response(self)
+            return
+
         if dual_agent_api_enabled() and path == "/api/demo/dual-agent":
             try:
                 from backend.researchos.api import dual_agent_routes
 
                 project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
-                json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.demo_dual_agent(project_id=project_id)))
+                result = run_dual_agent_api(lambda: dual_agent_routes.demo_dual_agent(project_id=project_id))
+                json_response(self, 200, normalize_dual_agent_result(result))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1140,17 +1233,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        if not dual_agent_api_enabled() and is_dual_agent_post_path(path):
+            dual_agent_disabled_response(self)
+            return
         try:
             payload = read_json(self)
         except json.JSONDecodeError as exc:
-            json_response(self, 400, {"error": f"invalid json: {exc}"})
+            json_response(self, 400, {"ok": False, "error": f"invalid json: {safe_error_message(exc)}"})
+            return
+        except ValueError as exc:
+            json_response(self, 400, {"ok": False, "error": safe_error_message(exc)})
             return
 
         if dual_agent_api_enabled() and path == "/api/agents/coordinator/run":
             try:
                 from backend.researchos.api import dual_agent_routes
 
-                json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.coordinator_run(payload)))
+                result = run_dual_agent_api(lambda: dual_agent_routes.coordinator_run(payload))
+                json_response(self, 200, normalize_dual_agent_result(result))
             except Exception as exc:
                 handle_error(self, exc)
             return
