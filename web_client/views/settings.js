@@ -33,38 +33,61 @@ function dualAgentSection(resolver, demoAvailable) {
 function llmSettingsSection(settings) {
   const available = settings.ok;
   const data = settings.data || {};
+  const mode = data.mode || data.settings?.mode || "single_key";
   return `<div class="grid">
     ${available ? "" : emptyState("Backend settings API not available yet", "The API key form is disabled until GET/POST /api/settings/llm and /test are implemented on the backend.")}
     <form class="form-grid" id="llmForm">
       <div class="form-row">
         <label for="llmMode">Mode</label>
         <select class="field" id="llmMode" ${available ? "" : "disabled"}>
-          <option>Single key for both agents</option>
-          <option>Separate keys for Brain Agent and Execution Agent</option>
-          <option>ResearchOS subscription</option>
+          <option value="single_key" ${mode === "single_key" ? "selected" : ""}>Single key for both agents</option>
+          <option value="separate_keys" ${mode === "separate_keys" ? "selected" : ""}>Separate keys for Brain Agent and Execution Agent</option>
+          <option value="subscription" ${mode === "subscription" ? "selected" : ""}>ResearchOS subscription</option>
         </select>
       </div>
       <div class="form-row">
-        <label for="llmProvider">Provider</label>
-        <input class="field" id="llmProvider" value="${escapeHtml(data.provider || "")}" placeholder="OpenAI compatible" ${available ? "" : "disabled"} />
+        <label for="llmProvider">Brain Agent provider</label>
+        <input class="field" id="llmProvider" value="${escapeHtml(data.brain_provider || data.provider || "")}" placeholder="OpenAI compatible" ${available ? "" : "disabled"} />
       </div>
       <div class="form-row">
-        <label for="llmModel">Model</label>
-        <input class="field" id="llmModel" value="${escapeHtml(data.model || "")}" placeholder="model name" ${available ? "" : "disabled"} />
+        <label for="llmModel">Brain Agent model</label>
+        <input class="field" id="llmModel" value="${escapeHtml(data.brain_model || data.model || "")}" placeholder="model name" ${available ? "" : "disabled"} />
       </div>
       <div class="form-row">
-        <label for="llmBaseUrl">Base URL</label>
-        <input class="field" id="llmBaseUrl" value="${escapeHtml(data.base_url || "")}" placeholder="https://api.openai.com/v1" ${available ? "" : "disabled"} />
+        <label for="llmBaseUrl">Brain Agent Base URL</label>
+        <input class="field" id="llmBaseUrl" value="${escapeHtml(data.brain_base_url || data.base_url || "")}" placeholder="https://api.openai.com/v1" ${available ? "" : "disabled"} />
       </div>
-      <div class="form-row full-span">
-        <label for="llmApiKey">API Key</label>
-        <input class="field" id="llmApiKey" type="password" autocomplete="off" placeholder="${escapeHtml(data.masked_key || "API key")}" ${available ? "" : "disabled"} />
+      <div class="form-row">
+        <label for="executionProvider">Execution Agent provider</label>
+        <input class="field" id="executionProvider" value="${escapeHtml(data.execution_provider || data.brain_provider || data.provider || "")}" placeholder="OpenAI compatible" ${available ? "" : "disabled"} />
+      </div>
+      <div class="form-row">
+        <label for="executionModel">Execution Agent model</label>
+        <input class="field" id="executionModel" value="${escapeHtml(data.execution_model || data.brain_model || data.model || "")}" placeholder="model name" ${available ? "" : "disabled"} />
+      </div>
+      <div class="form-row">
+        <label for="executionBaseUrl">Execution Agent Base URL</label>
+        <input class="field" id="executionBaseUrl" value="${escapeHtml(data.execution_base_url || data.brain_base_url || data.base_url || "")}" placeholder="https://api.openai.com/v1" ${available ? "" : "disabled"} />
+      </div>
+      <div class="form-row">
+        <label for="llmApiKey">Brain Agent API key</label>
+        <input class="field" id="llmApiKey" type="password" autocomplete="off" placeholder="${escapeHtml(data.brain_api_key_masked || data.masked_key || "API key")}" ${available ? "" : "disabled"} />
+      </div>
+      <div class="form-row">
+        <label for="executionApiKey">Execution Agent API key</label>
+        <input class="field" id="executionApiKey" type="password" autocomplete="off" placeholder="${escapeHtml(data.execution_api_key_masked || data.brain_api_key_masked || "API key")}" ${available ? "" : "disabled"} />
       </div>
       <div class="inline-actions full-span">
         <button class="button secondary" type="button" id="testLlm" ${available ? "" : "disabled"}>Test connection</button>
         <button class="button primary" type="submit" ${available ? "" : "disabled"}>Save</button>
+        <button class="button danger" type="button" id="clearKeys" ${available ? "" : "disabled"}>Clear keys</button>
       </div>
     </form>
+    <div class="badge-row">
+      ${badge(`Brain key: ${data.brain_api_key_masked || data.masked_key || "not configured"}`, data.brain_api_key_masked || data.masked_key ? "success" : "warning")}
+      ${badge(`Execution key: ${data.execution_api_key_masked || "not configured"}`, data.execution_api_key_masked ? "success" : "warning")}
+      ${badge(`Subscription: ${data.subscription_status || "not_configured"}`)}
+    </div>
   </div>`;
 }
 
@@ -96,23 +119,36 @@ export async function renderSettingsView({ root }) {
       event.preventDefault();
       const payload = {
         mode: root.querySelector("#llmMode").value,
-        provider: root.querySelector("#llmProvider").value,
-        model: root.querySelector("#llmModel").value,
-        base_url: root.querySelector("#llmBaseUrl").value,
-        api_key: root.querySelector("#llmApiKey").value,
+        brain_provider: root.querySelector("#llmProvider").value,
+        brain_model: root.querySelector("#llmModel").value,
+        brain_base_url: root.querySelector("#llmBaseUrl").value,
+        brain_api_key: root.querySelector("#llmApiKey").value,
+        execution_provider: root.querySelector("#executionProvider").value,
+        execution_model: root.querySelector("#executionModel").value,
+        execution_base_url: root.querySelector("#executionBaseUrl").value,
+        execution_api_key: root.querySelector("#executionApiKey").value,
       };
       const result = await saveLlmSettings(payload);
       root.querySelector("#llmApiKey").value = "";
+      root.querySelector("#executionApiKey").value = "";
       alert(result.ok ? "Settings saved." : `Save failed: ${result.error}`);
     });
     root.querySelector("#testLlm").addEventListener("click", async () => {
+      const apiKey = root.querySelector("#llmApiKey").value;
       const result = await testLlmSettings({
-        provider: root.querySelector("#llmProvider").value,
-        model: root.querySelector("#llmModel").value,
-        base_url: root.querySelector("#llmBaseUrl").value,
-        api_key: root.querySelector("#llmApiKey").value,
+        brain_provider: root.querySelector("#llmProvider").value,
+        brain_model: root.querySelector("#llmModel").value,
+        brain_base_url: root.querySelector("#llmBaseUrl").value,
+        brain_api_key: apiKey,
+        use_configured_key: !apiKey,
       });
       alert(result.ok ? "Connection test succeeded." : `Connection test failed: ${result.error}`);
+    });
+    root.querySelector("#clearKeys").addEventListener("click", async () => {
+      if (!confirm("Clear saved Brain and Execution API keys?")) return;
+      const result = await saveLlmSettings({ mode: root.querySelector("#llmMode").value, clear_brain_api_key: true, clear_execution_api_key: true });
+      alert(result.ok ? "Keys cleared." : `Clear failed: ${result.error}`);
+      renderSettingsView({ root });
     });
   }
 }

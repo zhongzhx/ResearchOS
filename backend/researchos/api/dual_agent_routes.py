@@ -15,6 +15,16 @@ from backend.researchos.demo.dual_agent_demo import run_demo_pdf_evidence_flow
 from backend.researchos.execution.runtime_adapter import default_agent_root
 from backend.researchos.skills.pipeline_registry import load_skill_catalog, list_pipelines, route_query_to_pipeline
 from backend.researchos.skills.resolver_checker import run_resolver_smoke_tests
+from backend.researchos.memory.compression.cognitive_state import load_cognitive_state, refresh_cognitive_state_after_task
+from backend.researchos.memory.episodic.episodic_memory_store import list_recent_episodes
+from backend.researchos.memory.events.event_store import list_events
+from backend.researchos.memory.governance.memory_manager import run_memory_maintenance
+from backend.researchos.memory.learning.autonomous_learning_loop import run_autonomous_learning_check
+from backend.researchos.memory.learning.memory_health_scanner import scan_memory_health
+from backend.researchos.memory.memory_config import redact_payload
+from backend.researchos.memory.retrieval.memory_retriever import retrieve_memories
+from backend.researchos.memory.semantic.semantic_memory_store import list_semantic_memories
+from backend.researchos.memory.working.working_memory_store import get_working_memory
 
 
 router = APIRouter() if APIRouter else None
@@ -65,6 +75,78 @@ def route_skill_query(payload: dict[str, Any]) -> dict[str, Any]:
     query = str(payload.get("user_query") or payload.get("query") or payload.get("message") or "")
     pipeline = route_query_to_pipeline(query)
     return {"ok": True, "query": query, "pipeline": pipeline}
+
+
+def memory_working(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    conversation_id = str(payload.get("conversation_id") or project_id)
+    return {"ok": True, "working_memory": redact_payload(get_working_memory(conversation_id, project_id))}
+
+
+def memory_cognitive_state(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    return {"ok": True, "cognitive_state": redact_payload(load_cognitive_state(project_id))}
+
+
+def memory_cognitive_state_refresh(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    task_id = str(payload.get("task_id") or "manual_refresh")
+    return {"ok": True, "cognitive_state": redact_payload(refresh_cognitive_state_after_task(project_id, task_id))}
+
+
+def memory_episodes(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    return {"ok": True, "episodes": redact_payload(list_recent_episodes(project_id, limit=int(payload.get("limit") or 20)))}
+
+
+def memory_items(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    memory_type = payload.get("type") or payload.get("memory_type")
+    layer = payload.get("layer")
+    items = list_semantic_memories(project_id, memory_type=str(memory_type) if memory_type else None, status=str(payload.get("status") or "active"))
+    if layer:
+        items = [item for item in items if item.get("memory_layer") == layer]
+    return {"ok": True, "items": redact_payload(items)}
+
+
+def memory_search(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    query = str(payload.get("query") or "")
+    types = payload.get("memory_types")
+    results = retrieve_memories(project_id, query, memory_types=types if isinstance(types, list) else None, top_k=int(payload.get("top_k") or 20))
+    return {"ok": True, "results": redact_payload(results)}
+
+
+def memory_health(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    return {"ok": True, "health": redact_payload(scan_memory_health(project_id))}
+
+
+def memory_maintenance_run(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    dry_run = bool(payload.get("dry_run", True))
+    if dry_run:
+        return {"ok": True, "dry_run": True, "health": redact_payload(scan_memory_health(project_id))}
+    return {"ok": True, "dry_run": False, "maintenance": redact_payload(run_memory_maintenance(project_id))}
+
+
+def memory_events(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "events": redact_payload(
+            list_events(
+                project_id=payload.get("project_id"),
+                task_id=payload.get("task_id"),
+                event_type=payload.get("event_type"),
+                limit=int(payload.get("limit") or 100),
+            )
+        ),
+    }
+
+
+def memory_autonomous_learning_check(payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(payload.get("project_id") or "global")
+    return {"ok": True, "autonomous_learning": redact_payload(run_autonomous_learning_check(project_id, dry_run=bool(payload.get("dry_run", True))))}
 
 
 def demo_dual_agent(project_id: str = "demo_project") -> dict[str, Any]:
@@ -128,6 +210,10 @@ async def demo_dual_agent_endpoint(project_id: str = "demo_project") -> dict[str
     return demo_dual_agent(project_id=project_id)
 
 
+async def memory_search_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    return memory_search(payload)
+
+
 if router is not None:
     router.post("/api/agents/coordinator/run")(coordinator_run_endpoint)
     router.post("/api/brain/skillrun/{skillrun_id}/process")(process_skillrun_endpoint)
@@ -139,3 +225,4 @@ if router is not None:
     router.get("/api/skills/pipelines")(pipeline_registry_endpoint)
     router.post("/api/skills/route")(route_skill_query_endpoint)
     router.get("/api/demo/dual-agent")(demo_dual_agent_endpoint)
+    router.post("/api/memory/search")(memory_search_endpoint)

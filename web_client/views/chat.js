@@ -1,9 +1,9 @@
-import { runCoordinator, runDualAgentDemo, sendLegacyChat } from "../api.js";
+import { runCoordinator, runProductDemoFlow, sendLegacyChat } from "../api.js";
 import { appState, setConversationId, setLastRunResult } from "../state.js";
 import { badge, escapeHtml, text } from "../components/cards.js";
 import { dualAgentMessage, plainMessage } from "../components/message.js";
 
-const chips = ["Collect literature", "Analyze data", "Build SOP", "Review claims", "Generate report", "Diagnose failure"];
+const chips = ["Collect literature", "Analyze data", "Build SOP", "Design experiment", "Review writing", "Generate report", "Diagnose failure"];
 let messages = [
   {
     role: "assistant",
@@ -39,7 +39,15 @@ async function submitPrompt(root, prompt) {
   const coordinator = await runCoordinator(prompt, appState.activeProjectId);
   if (coordinator.ok || canShowDualResult(coordinator)) {
     setLastRunResult(coordinator.data);
-    addMessage({ role: "assistant", type: "dual", data: coordinator.data });
+    if (canShowDualResult(coordinator)) {
+      addMessage({ role: "assistant", type: "dual", data: coordinator.data });
+    } else {
+      addMessage({
+        role: "assistant",
+        type: "plain",
+        body: text(coordinator.data?.answer || coordinator.data?.summary || coordinator.data?.message, "AURA returned without a summary."),
+      });
+    }
     window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
   } else {
     const legacy = await sendLegacyChat(prompt, appState.activeProjectId, appState.conversationId);
@@ -67,12 +75,12 @@ async function runDemo(root) {
   isSending = true;
   addMessage({ role: "user", type: "plain", body: "Run the Dual Agent demo flow." });
   renderChatView({ root });
-  const result = await runDualAgentDemo(appState.activeProjectId);
+  const result = await runProductDemoFlow(appState.activeProjectId);
   if (result.ok || canShowDualResult(result)) {
     setLastRunResult(result.data);
     addMessage({ role: "assistant", type: "dual", data: result.data });
   } else {
-    addMessage({ role: "assistant", type: "plain", body: `Demo flow is not available. ${result.error || "Dual Agent API may be disabled."}` });
+    addMessage({ role: "assistant", type: "plain", body: `Demo flow is not available. ${result.error || "Product demo endpoint may be disabled."}` });
   }
   isSending = false;
   renderChatView({ root });

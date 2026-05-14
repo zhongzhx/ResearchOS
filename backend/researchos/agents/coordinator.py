@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .agent_protocol import BrainDecision, ExecutionResult, TaskSpec
-from .brain_agent import ResearchBrainAgent
+from .brain_agent import ResearchBrainAgent, lightweight_chat_response
 from .execution_agent import ResearchExecutionAgent
 from backend.researchos.skills.pipeline_registry import get_pipeline_for_intent
 from backend.researchos.skills.resolver_checker import run_resolver_smoke_tests
@@ -14,6 +14,11 @@ from backend.researchos.tasks.task_handoff import compose_handoff
 from backend.researchos.tasks.task_memory_commit import build_memory_commit_record
 from backend.researchos.tasks.task_planner import build_goal, build_plan_markdown
 from backend.researchos.tasks.task_validator import validate_task_outputs
+from backend.researchos.memory.compression.cognitive_state import refresh_cognitive_state_after_task
+from backend.researchos.memory.episodic.episodic_memory_store import create_episode_from_task
+from backend.researchos.memory.events.event_store import append_event
+from backend.researchos.memory.memory_event import create_memory_event
+from backend.researchos.memory.working.working_memory_store import append_recent_message, compact_working_memory, set_current_task
 
 
 class AgentCoordinator:
@@ -29,8 +34,15 @@ class AgentCoordinator:
 
     def run(self, user_query: str, project_id: str | None = None) -> dict[str, Any]:
         intent = self.brain_agent._infer_intent(user_query)
+        lightweight = lightweight_chat_response(user_query, intent)
+        if lightweight:
+            return lightweight
+        if project_id:
+            append_recent_message(project_id, "user", user_query, {"project_id": project_id})
         compiled_context = self.brain_agent.compile_context(user_query, project_id, intent)
         task_spec = self.brain_agent.plan_task(user_query, compiled_context)
+        if project_id:
+            set_current_task(project_id, task_spec.task_id, project_id=project_id)
         pipeline_key = str(task_spec.input_data.get("pipeline_name") or task_spec.intent or task_spec.task_type)
         pipeline = get_pipeline_for_intent(pipeline_key)
         authorization = check_pipeline_authorization(task_spec, pipeline)
@@ -58,6 +70,7 @@ class AgentCoordinator:
         memory_commit = self.brain_agent.commit_promoted_memory(promotion_decision)
         graph_update = self.brain_agent.update_research_graph(project_id)
         context_index = self.brain_agent.update_context_index(project_id)
+        cognitive_state = refresh_cognitive_state_after_task(project_id, task_spec.task_id) if project_id else {}
         if result.skillrun_id:
             try:
                 post_task_reflection = self.brain_agent.run_post_task_reflection(result.skillrun_id)
@@ -78,19 +91,29 @@ class AgentCoordinator:
         response["required_human_review"] = bool(promotion_decision.get("required_human_review") or memory_commit.get("required_human_review"))
         response["research_graph"] = graph_update
         response["context_index"] = context_index
+        response["cognitive_state"] = cognitive_state
         response["post_task_reflection"] = post_task_reflection
         response["resolver_health"] = run_resolver_smoke_tests()
         return response
 
     def run_full_cycle(self, user_query: str, project_id: str | None = None, process_after_execution: bool = True) -> dict[str, Any]:
-        task = self.task_store.create_task(project_id, user_query)
         intent = self.brain_agent._infer_intent(user_query)
+        lightweight = lightweight_chat_response(user_query, intent)
+        if lightweight:
+            return lightweight
+        if project_id:
+            append_recent_message(project_id, "user", user_query, {"project_id": project_id})
+        task = self.task_store.create_task(project_id, user_query)
+        if project_id:
+            append_event(create_memory_event("task_created", project_id=project_id, task_id=task.task_id, source_id=task.task_id, source_type="task", payload={"user_query": user_query}))
         compiled_context = self.brain_agent.compile_context(user_query, project_id, intent)
         self.task_store.write_goal(task, build_goal(user_query, project_id, intent, compiled_context))
 
         task_spec = self.brain_agent.plan_task(user_query, compiled_context)
         task_spec.task_id = task.task_id
         task_spec.project_id = project_id or task_spec.project_id
+        if project_id:
+            set_current_task(project_id, task.task_id, project_id=project_id)
         pipeline_key = str(task_spec.input_data.get("pipeline_name") or task_spec.intent or task_spec.task_type)
         pipeline = get_pipeline_for_intent(pipeline_key)
         self.task_store.write_plan(task, build_plan_markdown(task_spec, pipeline))
@@ -106,6 +129,8 @@ class AgentCoordinator:
             self.task_store.write_validation(task, validation_report)
             memory_commit = _authorization_memory_commit(authorization)
             self.task_store.write_memory_commit(task, memory_commit)
+            episode = create_episode_from_task(task.task_id)
+            cognitive_state = refresh_cognitive_state_after_task(project_id, task.task_id) if project_id else {}
             decision = self.brain_agent.evaluate_execution_result(result, task_spec)
             handoff = compose_handoff(task)
             self.task_store.write_handoff(task, handoff)
@@ -123,6 +148,8 @@ class AgentCoordinator:
             response["promotion_validation_report"] = validation_report
             response["promotion_decision"] = {"accepted_targets": [], "rejected_items": memory_commit["rejected_items"], "required_human_review": True}
             response["memory_commit"] = memory_commit
+            response["episode"] = episode
+            response["cognitive_state"] = cognitive_state
             response["brain_memory_write"] = memory_commit
             response["rejected_items"] = memory_commit["rejected_items"]
             response["required_human_review"] = True
@@ -131,6 +158,8 @@ class AgentCoordinator:
             response["post_task_reflection"] = {"ok": False, "skipped": "execution blocked pending authorization"}
             response["post_task_processing"] = {"ok": False, "skipped": "execution blocked pending authorization"}
             response["resolver_health"] = run_resolver_smoke_tests()
+            if project_id:
+                compact_working_memory(project_id, project_id=project_id)
             return response
         self.task_store.mark_running(task)
 
@@ -175,6 +204,8 @@ class AgentCoordinator:
             pending_skill=(post_task_processing.get("pending_skill") if isinstance(post_task_processing, dict) else None),
         )
         self.task_store.write_memory_commit(task, memory_commit)
+        episode = create_episode_from_task(task.task_id)
+        cognitive_state = refresh_cognitive_state_after_task(project_id, task.task_id) if project_id else {}
 
         decision = self.brain_agent.evaluate_execution_result(result, task_spec)
         handoff = compose_handoff(task)
@@ -195,6 +226,8 @@ class AgentCoordinator:
         response["promotion_decision"] = promotion_decision
         response["memory_commit"] = memory_commit
         response["brain_memory_write"] = brain_memory_write
+        response["episode"] = episode
+        response["cognitive_state"] = cognitive_state
         response["rejected_items"] = memory_commit.get("rejected_items") or []
         response["required_human_review"] = bool(memory_commit.get("required_human_review"))
         response["research_graph"] = graph_update
@@ -202,6 +235,9 @@ class AgentCoordinator:
         response["post_task_reflection"] = post_task_reflection
         response["post_task_processing"] = post_task_processing
         response["resolver_health"] = run_resolver_smoke_tests()
+        if project_id:
+            append_event(create_memory_event("skillrun_completed", project_id=project_id, task_id=task.task_id, skillrun_id=result.skillrun_id, source_id=result.skillrun_id, source_type="skillrun", payload={"status": result.status, "summary": result.summary}))
+            compact_working_memory(project_id, project_id=project_id)
         return response
 
     def run_brain_only(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:

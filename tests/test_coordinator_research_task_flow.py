@@ -68,8 +68,10 @@ class FakeBrain:
 class FakeExecution:
     def __init__(self, status: str = "success") -> None:
         self.status = status
+        self.calls = 0
 
     def execute_task(self, task_spec: TaskSpec) -> ExecutionResult:
+        self.calls += 1
         return ExecutionResult(
             task_id=task_spec.task_id,
             skillrun_id="skillrun_fake" if self.status != "failed" else None,
@@ -116,6 +118,46 @@ class CoordinatorResearchTaskFlowTests(unittest.TestCase):
         self.assertTrue(memory_commit["failure_memory"])
         self.assertIn("Execution failed.", handoff)
         self.assertIn("execution_written", (task_dir / "events.jsonl").read_text(encoding="utf-8"))
+
+    def test_greeting_does_not_create_task_or_call_execution(self) -> None:
+        execution = FakeExecution()
+        coordinator = AgentCoordinator(execution_agent=execution, task_store=self.store)
+
+        response = coordinator.run_full_cycle("hi", project_id="project_1")
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["intent"], "general_chat")
+        self.assertIn("answer", response)
+        self.assertNotIn("task_spec", response)
+        self.assertNotIn("execution_result", response)
+        self.assertEqual(execution.calls, 0)
+        self.assertEqual(list((self.tmp / "research_tasks").glob("*")), [])
+
+    def test_model_identity_question_does_not_create_task_or_call_execution(self) -> None:
+        execution = FakeExecution()
+        coordinator = AgentCoordinator(execution_agent=execution, task_store=self.store)
+
+        response = coordinator.run_full_cycle("你是什么大模型", project_id="project_1")
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["intent"], "model_identity")
+        self.assertIn("answer", response)
+        self.assertNotIn("task_spec", response)
+        self.assertNotIn("execution_result", response)
+        self.assertEqual(execution.calls, 0)
+        self.assertEqual(list((self.tmp / "research_tasks").glob("*")), [])
+
+    def test_unclear_short_input_does_not_create_task_or_call_execution(self) -> None:
+        execution = FakeExecution()
+        coordinator = AgentCoordinator(execution_agent=execution, task_store=self.store)
+
+        response = coordinator.run_full_cycle("？？？", project_id="project_1")
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["intent"], "unclear_chat")
+        self.assertIn("没看懂", response["answer"])
+        self.assertEqual(execution.calls, 0)
+        self.assertEqual(list((self.tmp / "research_tasks").glob("*")), [])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from backend.researchos.brain.scientific_memory_validator import validate_memory
 from backend.researchos.brain.skill_crystallizer import crystallize_skill_from_reflection
 from backend.researchos.brain.skill_registry_review import register_pending_skill
 from backend.researchos.brain.workflow_template_builder import build_workflow_template_from_skillruns, save_workflow_template
+from backend.researchos.memory.retrieval.context_assembler import assemble_brain_context
 from backend.researchos.skills.pipeline_registry import get_pipeline_for_intent, route_query_to_pipeline
 from backend.researchos.skills.skill_discovery import search_skills
 
@@ -35,6 +37,9 @@ class ResearchBrainAgent:
 
     def handle_user_request(self, user_query: str, project_id: str | None = None) -> dict[str, Any]:
         intent = self._infer_intent(user_query)
+        lightweight = lightweight_chat_response(user_query, intent)
+        if lightweight:
+            return lightweight
         compiled_context = self.compile_context(user_query, project_id, intent)
         task_spec = self.plan_task(user_query, compiled_context)
         result = self.dispatch_to_execution(task_spec)
@@ -43,6 +48,12 @@ class ResearchBrainAgent:
 
     def compile_context(self, user_query: str, project_id: str | None, intent: str) -> dict[str, Any]:
         envelope = build_brain_context_envelope(user_query, project_id, intent)
+        memoryos_context: dict[str, Any] = {}
+        if project_id:
+            try:
+                memoryos_context = assemble_brain_context(project_id, user_query, intent=intent, max_tokens=4000)
+            except Exception as exc:  # noqa: BLE001
+                memoryos_context = {"warnings": [f"MemoryOS context unavailable: {exc}"]}
         if self.agent_root:
             try:
                 runtime_scripts_dir = scripts_dir()
@@ -63,6 +74,11 @@ class ResearchBrainAgent:
                     compiled.setdefault("user_query", user_query)
                     compiled.setdefault("intent", intent)
                     compiled.setdefault("project_id", project_id)
+                    if memoryos_context:
+                        compiled["memoryos_context"] = memoryos_context
+                        compiled.setdefault("project_summary", (memoryos_context.get("cognitive_state") or {}).get("current_goal") or "")
+                        compiled.setdefault("sources", memoryos_context.get("selected_semantic_memories") or [])
+                        compiled.setdefault("context_items", (memoryos_context.get("selected_semantic_memories") or []) + (memoryos_context.get("selected_episodes") or []))
                 return compiled
             except Exception as exc:  # noqa: BLE001
                 return {
@@ -73,6 +89,7 @@ class ResearchBrainAgent:
                     "sources": [],
                     "context_items": [],
                     "warnings": [f"Research Context Compiler unavailable: {exc}"],
+                    "memoryos_context": memoryos_context,
                     "context_envelope": envelope.to_dict(),
                 }
         return {
@@ -82,6 +99,7 @@ class ResearchBrainAgent:
             "project_summary": "",
             "sources": [],
             "context_items": [],
+            "memoryos_context": memoryos_context,
             "context_envelope": envelope.to_dict(),
         }
 
@@ -297,6 +315,12 @@ class ResearchBrainAgent:
         }
 
     def _infer_intent(self, user_query: str) -> str:
+        if is_general_chat_input(user_query):
+            return "general_chat"
+        if is_model_identity_input(user_query):
+            return "model_identity"
+        if is_unclear_short_input(user_query):
+            return "unclear_chat"
         lowered = user_query.lower()
         routed = route_query_to_pipeline(user_query)
         if routed.get("pipeline_name") and routed.get("pipeline_name") != "research_route_planning":
@@ -337,3 +361,112 @@ class ResearchBrainAgent:
             "research_planning": ["task_plan"],
         }
         return mapping.get(task_type, ["structured_output"])
+
+
+def is_general_chat_input(user_query: str) -> bool:
+    text = " ".join(str(user_query or "").casefold().strip().split())
+    if not text:
+        return True
+    greetings = {
+        "hi",
+        "hello",
+        "hey",
+        "yo",
+        "你好",
+        "您好",
+        "在吗",
+        "在么",
+        "帮我看看",
+        "帮我看下",
+    }
+    if text in greetings:
+        return True
+    return len(text) <= 12 and any(text.startswith(item) for item in greetings)
+
+
+def general_chat_response() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "intent": "general_chat",
+        "answer": "\u4f60\u597d\uff0c\u6211\u5728\u3002\u4f60\u53ef\u4ee5\u76f4\u63a5\u544a\u8bc9\u6211\u8981\u641c\u7d22\u6587\u732e\u3001\u6574\u7406 PDF\u3001\u5206\u6790\u6570\u636e\uff0c\u6216\u8005\u5148\u9009\u62e9\u4e00\u4e2a\u9879\u76ee\u540e\u7ee7\u7eed\u3002",
+        "suggested_actions": [],
+        "visible_sources": [],
+        "warnings": [],
+    }
+
+
+def is_model_identity_input(user_query: str) -> bool:
+    text = " ".join(str(user_query or "").casefold().strip().split())
+    if not text:
+        return False
+    return any(
+        phrase in text
+        for phrase in [
+            "什么大模型",
+            "哪个大模型",
+            "什么模型",
+            "哪个模型",
+            "model are you",
+            "what model",
+            "llm",
+        ]
+    )
+
+
+def is_unclear_short_input(user_query: str) -> bool:
+    text = str(user_query or "").strip()
+    if not text:
+        return True
+    compact = "".join(text.split())
+    if len(compact) > 8:
+        return False
+    return not any(ch.isalnum() or "\u4e00" <= ch <= "\u9fff" for ch in compact)
+
+
+def model_identity_response() -> dict[str, Any]:
+    provider = os.environ.get("LLM_PROVIDER") or ("openai-compatible" if os.environ.get("OPENAI_API_KEY") else "mock")
+    model = os.environ.get("LLM_MODEL") or os.environ.get("OPENAI_MODEL") or ""
+    base_url = os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or ""
+    if model:
+        answer = f"当前后端连接的是 {provider} 模型接口，模型名是 {model}。"
+    else:
+        answer = f"当前后端模型 provider 是 {provider}，但没有读取到明确的模型名。"
+    if base_url:
+        answer += f" Base URL 是 {base_url}。"
+    return {
+        "ok": True,
+        "intent": "model_identity",
+        "answer": answer,
+        "suggested_actions": [],
+        "visible_sources": [],
+        "warnings": [],
+    }
+
+
+def unclear_chat_response() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "intent": "unclear_chat",
+        "answer": "我没看懂这条消息。你可以直接问我要做什么，例如“你是什么大模型”、 “帮我搜索文献”，或“总结当前项目”。",
+        "suggested_actions": [],
+        "visible_sources": [],
+        "warnings": [],
+    }
+
+
+def lightweight_chat_response(user_query: str, intent: str | None = None) -> dict[str, Any] | None:
+    resolved = intent or ""
+    if not resolved:
+        if is_general_chat_input(user_query):
+            resolved = "general_chat"
+        elif is_model_identity_input(user_query):
+            resolved = "model_identity"
+        elif is_unclear_short_input(user_query):
+            resolved = "unclear_chat"
+    if resolved == "general_chat":
+        return general_chat_response()
+    if resolved == "model_identity":
+        return model_identity_response()
+    if resolved == "unclear_chat":
+        return unclear_chat_response()
+    return None

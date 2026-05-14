@@ -1,6 +1,7 @@
 import {
   activatePendingSkill,
   getPendingSkills,
+  getProductFeatures,
   getResolverHealth,
   getSkillCatalog,
   getSkillPipelines,
@@ -10,12 +11,13 @@ import {
 import { appState, setPendingSkills, setResolverHealth } from "../state.js";
 import { apiErrorCard, badge, escapeHtml, firstArray, itemCard } from "../components/cards.js";
 import { emptyState } from "../components/empty_state.js";
+import { featureStatusRow } from "../features/feature_status.js";
 import { jsonDetails, jsonViewer } from "../components/json_viewer.js";
 
 let activeTab = "Catalog";
 let routeResult = null;
 let filter = "";
-const tabs = ["Catalog", "Pipelines", "Route Tester", "Pending Skills", "Resolver Health"];
+const tabs = ["Product Flows", "Catalog", "Pipelines", "Route Tester", "Pending Skills", "Resolver Health"];
 
 function tabButtons() {
   return `<div class="tabs">${tabs.map((tab) => `<button class="tab ${tab === activeTab ? "is-active" : ""}" type="button" data-skills-tab="${tab}">${tab}</button>`).join("")}</div>`;
@@ -50,6 +52,13 @@ function catalogView(result) {
       }),
     )
     .join("")}</div>`;
+}
+
+function productFlowsView(result) {
+  if (!result.ok) return apiErrorCard(result, "Product feature status unavailable");
+  const rows = filtered(firstArray(result.data, ["features"]));
+  if (!rows.length) return emptyState("No product flows match", "Try a different feature, pipeline, or status.");
+  return `<div class="list">${rows.map((feature) => featureStatusRow(feature) + jsonDetails("Feature contract", feature)).join("")}</div>`;
 }
 
 function pipelinesView(result) {
@@ -123,10 +132,11 @@ export async function renderSkillsView({ root }) {
     <div class="page-scroll"><div class="panel pad" id="skillsContent">${emptyState("Loading skills", "Fetching catalog, pipelines, pending skills, and resolver health.")}</div></div>
   </section>`;
 
-  const [catalog, pipelines, pending, resolver] = await Promise.all([getSkillCatalog(), getSkillPipelines(), getPendingSkills(), getResolverHealth()]);
+  const [features, catalog, pipelines, pending, resolver] = await Promise.all([getProductFeatures(), getSkillCatalog(), getSkillPipelines(), getPendingSkills(), getResolverHealth()]);
   if (pending.ok) setPendingSkills(pending.data);
   setResolverHealth(resolver.ok ? { ok: true, ...resolver.data } : { ok: false, error: resolver.error, status: resolver.status });
   const views = {
+    "Product Flows": productFlowsView(features),
     Catalog: catalogView(catalog),
     Pipelines: pipelinesView(pipelines),
     "Route Tester": routeTester(),

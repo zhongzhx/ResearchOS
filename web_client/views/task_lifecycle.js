@@ -1,4 +1,4 @@
-import { getTasks } from "../api.js";
+import { getTask, getTasks } from "../api.js";
 import { appState } from "../state.js";
 import { apiErrorCard, asArray, badge, escapeHtml, itemCard, loadingPanel, text } from "../components/cards.js";
 import { detailsBlock, fieldList } from "../components/details.js";
@@ -86,7 +86,16 @@ export async function renderTaskLifecycleView({ root }) {
         title: task.title || task.user_query || task.task_type || task.id,
         subtitle: task.summary || task.current_stage || task.task_id || "Task metadata only",
         status: task.status || "recorded",
+        clickable: true,
+        data: task.id || task.task_id,
       }),
     )
     .join("")}</div>`;
+  root.querySelectorAll("[data-item-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const detail = await getTask(button.dataset.itemId);
+      const task = detail.data?.task || detail.data || {};
+      root.querySelector("#taskDetail").innerHTML = detail.ok ? renderLastRun(task) : apiErrorCard(detail, "Task detail unavailable");
+    });
+  });
 }

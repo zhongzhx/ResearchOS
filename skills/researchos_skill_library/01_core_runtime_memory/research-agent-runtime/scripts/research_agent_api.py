@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -228,6 +230,213 @@ def handle_error(handler: BaseHTTPRequestHandler, exc: Exception) -> None:
         json_response(handler, 500, {"ok": False, "error": message})
 
 
+def llm_settings_path() -> Path:
+    return CONFIG.agent_root / "config" / "llm_settings.json"
+
+
+def llm_settings_secret_path() -> Path:
+    return CONFIG.agent_root / "config" / ".llm_settings_key"
+
+
+def mask_secret(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 8:
+        return f"{text[:2]}...{text[-2:]}"
+    return f"{text[:3]}...{text[-4:]}"
+
+
+def _local_secret() -> bytes:
+    path = llm_settings_secret_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(secrets.token_urlsafe(32), encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except Exception:
+            pass
+    return path.read_text(encoding="utf-8").encode("utf-8")
+
+
+def _protect_secret(value: str) -> str:
+    if not value:
+        return ""
+    key = _local_secret()
+    raw = value.encode("utf-8")
+    encrypted = bytes(byte ^ key[index % len(key)] for index, byte in enumerate(raw))
+    return base64.urlsafe_b64encode(encrypted).decode("ascii")
+
+
+def _unprotect_secret(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        key = _local_secret()
+        raw = base64.urlsafe_b64decode(value.encode("ascii"))
+        decrypted = bytes(byte ^ key[index % len(key)] for index, byte in enumerate(raw))
+        return decrypted.decode("utf-8")
+    except Exception:
+        return ""
+
+
+def _read_saved_llm_settings() -> dict[str, Any]:
+    path = llm_settings_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _public_llm_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in settings.items() if not key.endswith("_encrypted")}
+
+
+def _llm_env_settings() -> dict[str, str]:
+    provider = os.environ.get("LLM_PROVIDER") or ("openai-compatible" if os.environ.get("OPENAI_API_KEY") else "")
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY") or ""
+    return {
+        "provider": provider,
+        "model": os.environ.get("OPENAI_MODEL") or os.environ.get("LLM_MODEL") or "",
+        "base_url": os.environ.get("OPENAI_BASE_URL") or os.environ.get("LLM_BASE_URL") or "",
+        "api_key_masked": mask_secret(api_key),
+    }
+
+
+def get_llm_settings_payload() -> dict[str, Any]:
+    saved = _read_saved_llm_settings()
+    env_settings = _llm_env_settings()
+    provider = str(saved.get("brain_provider") or saved.get("provider") or env_settings.get("provider") or "")
+    model = str(saved.get("brain_model") or saved.get("model") or env_settings.get("model") or "")
+    base_url = str(saved.get("brain_base_url") or saved.get("base_url") or env_settings.get("base_url") or "")
+    masked = str(saved.get("brain_api_key_masked") or saved.get("api_key_masked") or env_settings.get("api_key_masked") or "")
+    execution_masked = str(saved.get("execution_api_key_masked") or (masked if saved.get("mode") == "single_key" else ""))
+    settings = {
+        "mode": saved.get("mode") or "single_key",
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "masked_key": masked,
+        "api_key_configured": bool(masked),
+        "brain_provider": provider,
+        "brain_model": model,
+        "brain_base_url": base_url,
+        "brain_api_key_masked": masked,
+        "execution_provider": saved.get("execution_provider") or provider,
+        "execution_model": saved.get("execution_model") or model,
+        "execution_base_url": saved.get("execution_base_url") or base_url,
+        "execution_api_key_masked": execution_masked,
+        "subscription_status": saved.get("subscription_status") or "not_configured",
+        "updated_at": saved.get("updated_at") or "",
+    }
+    return {"ok": True, **settings, "settings": settings}
+
+
+def save_llm_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    existing = _read_saved_llm_settings()
+    mode = str(payload.get("mode") or "single_key").strip() or "single_key"
+    mode_aliases = {
+        "Single key for both agents": "single_key",
+        "Separate keys for Brain Agent and Execution Agent": "separate_keys",
+        "ResearchOS subscription": "subscription",
+    }
+    mode = mode_aliases.get(mode, mode)
+    provider = str(payload.get("brain_provider") or payload.get("provider") or existing.get("brain_provider") or "").strip()
+    model = str(payload.get("brain_model") or payload.get("model") or existing.get("brain_model") or "").strip()
+    base_url = str(payload.get("brain_base_url") or payload.get("base_url") or existing.get("brain_base_url") or "").strip()
+    api_key = str(payload.get("brain_api_key") or payload.get("api_key") or "").strip()
+    execution_provider = str(payload.get("execution_provider") or existing.get("execution_provider") or provider).strip()
+    execution_model = str(payload.get("execution_model") or existing.get("execution_model") or model).strip()
+    execution_base_url = str(payload.get("execution_base_url") or existing.get("execution_base_url") or base_url).strip()
+    execution_api_key = str(payload.get("execution_api_key") or "").strip()
+    if payload.get("clear_brain_api_key"):
+        brain_encrypted = ""
+        masked = ""
+    elif api_key:
+        brain_encrypted = _protect_secret(api_key)
+        masked = mask_secret(api_key)
+    else:
+        brain_encrypted = str(existing.get("brain_api_key_encrypted") or existing.get("api_key_encrypted") or "")
+        masked = str(existing.get("brain_api_key_masked") or existing.get("api_key_masked") or _llm_env_settings().get("api_key_masked") or "")
+    if mode == "single_key":
+        execution_encrypted = brain_encrypted
+        execution_masked = masked
+    elif payload.get("clear_execution_api_key"):
+        execution_encrypted = ""
+        execution_masked = ""
+    elif execution_api_key:
+        execution_encrypted = _protect_secret(execution_api_key)
+        execution_masked = mask_secret(execution_api_key)
+    else:
+        execution_encrypted = str(existing.get("execution_api_key_encrypted") or "")
+        execution_masked = str(existing.get("execution_api_key_masked") or "")
+    settings = {
+        "mode": mode,
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "masked_key": masked,
+        "api_key_configured": bool(masked),
+        "brain_provider": provider,
+        "brain_model": model,
+        "brain_base_url": base_url,
+        "brain_api_key_masked": masked,
+        "brain_api_key_encrypted": brain_encrypted,
+        "execution_provider": execution_provider,
+        "execution_model": execution_model,
+        "execution_base_url": execution_base_url,
+        "execution_api_key_masked": execution_masked,
+        "execution_api_key_encrypted": execution_encrypted,
+        "subscription_status": "not_configured" if mode != "subscription" else str(payload.get("subscription_status") or existing.get("subscription_status") or "not_connected"),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    path = llm_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except Exception:
+        pass
+    return {"ok": True, "settings": _public_llm_settings(settings)}
+
+
+def test_llm_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    use_configured_key = bool(payload.get("use_configured_key"))
+    saved = _read_saved_llm_settings() if use_configured_key else {}
+    provider = str(payload.get("brain_provider") or payload.get("provider") or saved.get("brain_provider") or "").strip()
+    model = str(payload.get("brain_model") or payload.get("model") or saved.get("brain_model") or "").strip()
+    base_url = str(payload.get("brain_base_url") or payload.get("base_url") or saved.get("brain_base_url") or "").strip()
+    api_key = str(payload.get("brain_api_key") or payload.get("api_key") or "").strip()
+    if not api_key and use_configured_key:
+        api_key = _unprotect_secret(str(saved.get("brain_api_key_encrypted") or ""))
+    if not api_key:
+        return {"ok": False, "error": "not_configured"}
+    adapter = research_os.LLMAdapter()
+    if provider:
+        adapter.provider = provider
+    if model:
+        adapter.model = model
+    if base_url:
+        adapter.base_url = base_url
+    adapter.api_key = api_key
+    try:
+        answer = adapter.chat_text("只回复：connection_ok", system_prompt="You are a connection test endpoint. Reply briefly.", temperature=0)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": safe_error_message(exc)}
+    if not str(answer or "").strip():
+        return {"ok": False, "error": "empty_model_response"}
+    return {
+        "ok": True,
+        "provider": adapter.provider,
+        "model": adapter.model,
+        "base_url": adapter.base_url,
+        "message": "connection_ok",
+    }
+
+
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", "0") or "0")
     if not length:
@@ -240,6 +449,8 @@ def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 def normalize_dual_agent_result(payload: dict[str, Any]) -> dict[str, Any]:
     source = payload.get("details") if isinstance(payload.get("details"), dict) else payload
+    if source.get("answer") and not any(source.get(key) for key in ["task_spec", "execution_result", "details", "handoff", "handoff_summary"]):
+        return dict(source)
     execution_result = source.get("execution_result") or payload.get("execution_result") or {}
     memory_update = (
         source.get("memory_update")
@@ -275,6 +486,10 @@ def normalize_dual_agent_result(payload: dict[str, Any]) -> dict[str, Any]:
     for key, value in payload.items():
         normalized.setdefault(key, value)
     return normalized
+
+
+def query_payload(query: dict[str, list[str]]) -> dict[str, Any]:
+    return {key: values[0] if values else "" for key, values in query.items()}
 
 
 def run_job_background(payload: dict[str, Any], job_id: str) -> None:
@@ -349,6 +564,81 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             json_response(self, 200, {"status": "ok", "state_db": str(state_db(CONFIG.agent_root)), "log_path": str(api_log_path())})
             return
+
+        if path == "/api/settings/llm":
+            try:
+                json_response(self, 200, get_llm_settings_payload())
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/api/product/features":
+            try:
+                from backend.researchos.product.feature_flows import list_product_features
+
+                features = list_product_features()
+                json_response(self, 200, {"ok": True, "count": len(features), "features": features})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/api/product/features/") and path.endswith("/demo"):
+            try:
+                from backend.researchos.product.feature_flows import run_product_feature_demo
+
+                feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/demo").strip("/"))
+                project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
+                json_response(self, 200, run_product_feature_demo(feature_id, project_id=project_id))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/api/product/features/"):
+            try:
+                from backend.researchos.product.feature_flows import get_product_feature
+
+                feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").strip("/"))
+                json_response(self, 200, {"ok": True, "feature": get_product_feature(feature_id)})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/api/demo/product-flow":
+            try:
+                from backend.researchos.product.feature_flows import run_product_feature_demo
+
+                project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
+                json_response(self, 200, run_product_feature_demo("dual_agent_research_task", project_id=project_id))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/api/memory/"):
+            try:
+                from backend.researchos.api import dual_agent_routes
+
+                payload = query_payload(query)
+                if path == "/api/memory/working":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_working(payload)))
+                    return
+                if path == "/api/memory/cognitive-state":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_cognitive_state(payload)))
+                    return
+                if path == "/api/memory/episodes":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_episodes(payload)))
+                    return
+                if path == "/api/memory/items":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_items(payload)))
+                    return
+                if path == "/api/memory/health":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_health(payload)))
+                    return
+                if path == "/api/memory/events":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_events(payload)))
+                    return
+            except Exception as exc:
+                handle_error(self, exc)
+                return
 
         if path == "/research-os/runtime/status":
             try:
@@ -1245,6 +1535,40 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 400, {"ok": False, "error": safe_error_message(exc)})
             return
 
+        if path == "/api/settings/llm":
+            try:
+                json_response(self, 200, save_llm_settings_payload(payload))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/api/settings/llm/test":
+            try:
+                json_response(self, 200, test_llm_settings_payload(payload))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/api/product/features/") and path.endswith("/run"):
+            try:
+                from backend.researchos.product.feature_flows import run_product_feature
+
+                feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/run").strip("/"))
+                json_response(self, 200, run_product_feature(feature_id, payload))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/api/demo/product-flow/run":
+            try:
+                from backend.researchos.product.feature_flows import run_product_feature_demo
+
+                project_id = str(payload.get("project_id") or "demo_project")
+                json_response(self, 200, run_product_feature_demo("dual_agent_research_task", project_id=project_id))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
         if dual_agent_api_enabled() and path == "/api/agents/coordinator/run":
             try:
                 from backend.researchos.api import dual_agent_routes
@@ -1254,6 +1578,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 handle_error(self, exc)
             return
+
+        if path.startswith("/api/memory/"):
+            try:
+                from backend.researchos.api import dual_agent_routes
+
+                if path == "/api/memory/cognitive-state/refresh":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_cognitive_state_refresh(payload)))
+                    return
+                if path == "/api/memory/search":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_search(payload)))
+                    return
+                if path == "/api/memory/maintenance/run":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_maintenance_run(payload)))
+                    return
+                if path == "/api/memory/autonomous-learning/check":
+                    json_response(self, 200, run_dual_agent_api(lambda: dual_agent_routes.memory_autonomous_learning_check(payload)))
+                    return
+            except Exception as exc:
+                handle_error(self, exc)
+                return
 
         if dual_agent_api_enabled() and path.startswith("/api/brain/skillrun/") and path.endswith("/process"):
             try:

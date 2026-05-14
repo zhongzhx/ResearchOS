@@ -62,6 +62,7 @@ export function apiPost(path, body = {}) {
 export const getHealth = () => apiGet("/health");
 export const getProjects = () => apiGet("/research-os/projects");
 export const getTasks = (projectId) => apiGet(withProject("/research-os/tasks", projectId, { limit: 100 }));
+export const getTask = (taskId) => apiGet(`/research-os/tasks/${encodeURIComponent(taskId)}`);
 export const getReferences = (projectId, search = "") => apiGet(withProject("/research-os/references", projectId, { search, limit: 100 }));
 export const getMemoryContext = (projectId, query = "Current project summary") =>
   apiGet(withProject("/research-os/memory/context", projectId, { query, limit: 30 }));
@@ -70,6 +71,11 @@ export const sendLegacyChat = (message, projectId, conversationId = "") =>
   apiPost("/research-os/agent/chat", { message, project_id: projectId, conversation_id: conversationId });
 export const runCoordinator = (userQuery, projectId) => apiPost("/api/agents/coordinator/run", { user_query: userQuery, project_id: projectId });
 export const runDualAgentDemo = (projectId) => apiGet(withProject("/api/demo/dual-agent", projectId));
+export const getProductFeatures = () => apiGet("/api/product/features");
+export const getProductFeature = (featureId) => apiGet(`/api/product/features/${encodeURIComponent(featureId)}`);
+export const runProductFeature = (featureId, payload = {}) => apiPost(`/api/product/features/${encodeURIComponent(featureId)}/run`, payload);
+export const runProductFeatureDemo = (featureId, projectId) => apiGet(withProject(`/api/product/features/${encodeURIComponent(featureId)}/demo`, projectId));
+export const runProductDemoFlow = (projectId) => apiPost("/api/demo/product-flow/run", { project_id: projectId });
 export const getSkillCatalog = () => apiGet("/api/skills/catalog");
 export const getSkillPipelines = () => apiGet("/api/skills/pipelines");
 export const routeSkillQuery = (query, projectId) => apiPost("/api/skills/route", { user_query: query, project_id: projectId });
