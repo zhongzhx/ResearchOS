@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,37 @@ def _repo_root(repo_root: str | Path | None = None) -> Path:
 
 
 def _runtime_root(repo_root: str | Path | None = None) -> Path:
-    return _repo_root(repo_root) / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime"
+    root = _repo_root(repo_root)
+    backend_runtime = root / "backend" / "research_agent_runtime"
+    if backend_runtime.exists():
+        return backend_runtime
+    legacy_runtime = root / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime"
+    if legacy_runtime.exists():
+        warnings.warn(
+            f"Deprecated ResearchOS runtime path fallback in use: {legacy_runtime}. "
+            f"Move runtime prompts/assets to {backend_runtime}.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return legacy_runtime
+    return backend_runtime
+
+
+def _prompt_root(repo_root: str | Path | None = None) -> Path:
+    root = _repo_root(repo_root)
+    backend_prompts = root / "backend" / "research_agent_runtime" / "prompts"
+    if backend_prompts.exists():
+        return backend_prompts
+    legacy_prompts = root / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime" / "prompts"
+    if legacy_prompts.exists():
+        warnings.warn(
+            f"Deprecated ResearchOS prompt path fallback in use: {legacy_prompts}. "
+            f"Move prompts to {backend_prompts}.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return legacy_prompts
+    return backend_prompts
 
 
 def _scripts_root(repo_root: str | Path | None = None) -> Path:
@@ -32,9 +63,10 @@ def _import_from_mvp(module_name: str, repo_root: str | Path | None = None) -> A
 def locate_mvp_prompt_sources(repo_root: str | Path | None = None) -> dict[str, Any]:
     runtime = _runtime_root(repo_root)
     scripts = _scripts_root(repo_root)
-    prompts = runtime / "prompts"
+    prompts = _prompt_root(repo_root)
     zh = prompts / "zh"
     system_prompt = prompts / "researchos_agent_system_prompt.md"
+    legacy_prompts = _repo_root(repo_root) / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime" / "prompts"
     return {
         "runtime_root": str(runtime),
         "scripts_root": str(scripts),
@@ -43,6 +75,8 @@ def locate_mvp_prompt_sources(repo_root: str | Path | None = None) -> dict[str, 
         "system_prompt_exists": system_prompt.exists(),
         "zh_prompt_root": str(zh),
         "zh_prompt_files": [str(path) for path in sorted(zh.glob("*.md"))] if zh.exists() else [],
+        "legacy_prompt_root": str(legacy_prompts),
+        "using_legacy_prompt_fallback": prompts == legacy_prompts,
         "prompt_loader": str(scripts / "researchos_agent_prompt.py"),
         "prompt_router": str(scripts / "researchos_prompt_router.py"),
         "context_compiler": str(scripts / "research_context_compiler.py"),

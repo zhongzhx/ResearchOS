@@ -25,7 +25,7 @@ class ClientAnswerSourceDisplayTests(unittest.TestCase):
         source = (ROOT / "web_client" / "components" / "message.js").read_text(encoding="utf-8")
 
         self.assertIn("Research Task Handoff", source)
-        self.assertIn("打开双 Agent 实验模式", source)
+        self.assertIn("该响应来自任务执行链路，已隐藏内部交接内容。请在实验模式或任务页查看详情。", source)
 
 
 if __name__ == "__main__":

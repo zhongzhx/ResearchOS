@@ -12,7 +12,7 @@ Use this skill when progress is stuck. It should inspect the project KB first, c
 ## Fast Path
 
 ```powershell
-py .\scripts\diagnose_research_bottleneck.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --project-name "my_project" --problem "cell viability improvement has plateaued" --output-root ".\diagnosis_runs"
+py .\scripts\diagnose_research_bottleneck.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --project-name "my_project" --problem "cell viability improvement has plateaued" --output-root ".\diagnosis_runs"
 ```
 
 Add experiment files:

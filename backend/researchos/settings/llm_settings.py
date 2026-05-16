@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.researchos.llm.gateway import test_llm_connection
+from backend.researchos.llm.gateway import check_llm_connection
 
 from .secret_store import delete_llm_settings, load_llm_settings_summary, redact_secrets_in_obj, save_llm_settings
 
@@ -27,12 +27,12 @@ def test_llm_settings(target: str | dict[str, Any] = "both") -> dict[str, Any]:
         subscription = summary.get("subscription") or {}
         return {"ok": bool(subscription.get("enabled")), "target": "subscription", "status": subscription.get("status") or "inactive"}
     if target == "both":
-        brain = test_llm_connection("brain_agent")
-        execution = test_llm_connection("execution_agent")
+        brain = check_llm_connection("brain_agent")
+        execution = check_llm_connection("execution_agent")
         return {"ok": bool(brain.get("ok") and execution.get("ok")), "brain_agent": brain, "execution_agent": execution}
     if target not in {"brain_agent", "execution_agent"}:
         return {"ok": False, "error": "invalid_target"}
-    return redact_secrets_in_obj(test_llm_connection(target))
+    return redact_secrets_in_obj(check_llm_connection(target))
 
 
 def delete_settings() -> dict[str, Any]:

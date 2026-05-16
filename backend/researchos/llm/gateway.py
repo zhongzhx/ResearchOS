@@ -125,7 +125,7 @@ def _messages_for_mvp_adapter(messages: list[dict[str, Any]]) -> tuple[str, str]
     return prompt, "\n\n".join(system_parts)
 
 
-def test_llm_connection(agent_name: str) -> dict[str, Any]:
+def check_llm_connection(agent_name: str) -> dict[str, Any]:
     config = get_llm_config_for_agent(agent_name)
     provider = str(config.get("provider") or "").lower()
     if provider == "mock":

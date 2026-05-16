@@ -12,7 +12,7 @@ Use this skill to convert a research objective into a controlled experiment plan
 ## Fast Path
 
 ```powershell
-py .\scripts\design_experiment_matrix.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --project-name "my_project" --objective "optimize nanoparticle synthesis stability" --field materials --factor "temperature:60,80,100" --factor "pH:6,7,8" --metric "particle_size:min" --metric "stability:max" --output-root ".\experiment_designs"
+py .\scripts\design_experiment_matrix.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --project-name "my_project" --objective "optimize nanoparticle synthesis stability" --field materials --factor "temperature:60,80,100" --factor "pH:6,7,8" --metric "particle_size:min" --metric "stability:max" --output-root ".\experiment_designs"
 ```
 
 ## Design Standard

@@ -12,7 +12,7 @@ Use this skill to turn project memory into a weekly research report. The report 
 ## Fast Path
 
 ```powershell
-py .\scripts\weekly_research_report.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --project-name "my_project" --output-root ".\weekly_reports"
+py .\scripts\weekly_research_report.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --project-name "my_project" --output-root ".\weekly_reports"
 ```
 
 Specify dates:

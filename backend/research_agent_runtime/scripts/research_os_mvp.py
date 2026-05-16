@@ -2347,6 +2347,28 @@ def list_projects_for_ui(agent_root: Path) -> list[dict[str, Any]]:
     return items
 
 
+def ensure_default_chat_project(agent_root: Path, project_id: str) -> None:
+    if clean(project_id) != "default":
+        return
+    conn = connect(agent_root)
+    try:
+        exists = conn.execute("SELECT 1 FROM projects WHERE id=?", ("default",)).fetchone()
+    finally:
+        conn.close()
+    if exists:
+        return
+    create_project(
+        agent_root,
+        {
+            "id": "default",
+            "project_name": "default",
+            "display_name": "默认项目 default",
+            "title": "默认项目 default",
+            "short_description": "默认 Chat 使用的稳定项目。",
+        },
+    )
+
+
 def normalize_project_match_text(value: Any) -> str:
     return re.sub(r"\s+", "", clean(value).lower())
 
@@ -16593,7 +16615,14 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("message is required")
     developer_debug = bool(payload.get("developer_debug") or payload.get("debug_mode") or payload.get("include_internal_ids")) or developer_debug_mode_enabled()
 
-    conversation = ensure_chat_session(agent_root, project_id, clean(payload.get("conversation_id") or payload.get("session_id")), title=message[:80])
+    ensure_default_chat_project(agent_root, project_id)
+    requested_conversation_id = clean(payload.get("conversation_id") or payload.get("session_id"))
+    try:
+        conversation = ensure_chat_session(agent_root, project_id, requested_conversation_id, title=message[:80])
+    except ValueError as exc:
+        if "different project" not in str(exc):
+            raise
+        conversation = ensure_chat_session(agent_root, project_id, "", title=message[:80])
     conversation_id = conversation["id"]
     history_before = list_chat_messages(agent_root, conversation_id, project_id, limit=int(payload.get("conversation_limit") or 16))
     previous_intent = clean(payload.get("previous_intent")) or latest_chat_intent(history_before)

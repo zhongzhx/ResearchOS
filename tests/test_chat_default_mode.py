@@ -19,8 +19,10 @@ class ChatDefaultModeTests(unittest.TestCase):
         stable_source = stable_match.group(0)
         experimental_source = experimental_match.group(0)
 
-        self.assertIn("sendLegacyChat(prompt, appState.activeProjectId, appState.conversationId)", stable_source)
-        self.assertIn("runCoordinator(prompt, appState.activeProjectId, appState.conversationId)", experimental_source)
+        self.assertIn("const activeProjectId = resolveChatProjectId()", stable_source)
+        self.assertIn("currentChatSessionIds(activeProjectId)", stable_source)
+        self.assertIn("sendLegacyChat(prompt, activeProjectId, conversationId, sessionId)", stable_source)
+        self.assertIn("runCoordinator(prompt, activeProjectId, conversationId, sessionId)", experimental_source)
         self.assertIn("if (appState.dualAgentEnabled)", submit_source)
         self.assertIn("await sendStableChat(prompt)", submit_source)
         self.assertLess(submit_source.index("if (appState.dualAgentEnabled)"), submit_source.index("await sendStableChat(prompt)"))
@@ -71,7 +73,8 @@ class ChatDefaultModeTests(unittest.TestCase):
 
         self.assertIn('apiPost("/research-os/agent/chat"', api_js)
         self.assertIn('apiPost("/api/agents/coordinator/run"', api_js)
-        self.assertIn("conversation_id: conversationId", api_js)
+        self.assertIn("conversation_id: safeConversationId", api_js)
+        self.assertIn("session_id: safeSessionId", api_js)
         self.assertIn('replace(/^\\/api\\/backend/, "")', electron)
 
     def test_electron_proxy_preserves_post_body(self) -> None:

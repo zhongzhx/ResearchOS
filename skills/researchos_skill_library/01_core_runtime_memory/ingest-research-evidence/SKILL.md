@@ -12,7 +12,7 @@ Use this skill as the entry point for anything that should become project memory
 ## Fast Path
 
 ```powershell
-py .\scripts\ingest_research_evidence.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --project-name "my_project" --source-file ".\note.md" --source-kind "literature_note"
+py .\scripts\ingest_research_evidence.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --project-name "my_project" --source-file ".\note.md" --source-kind "literature_note"
 ```
 
 Ingest direct text:

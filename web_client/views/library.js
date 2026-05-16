@@ -6,7 +6,7 @@ import {
   getRagQueries,
   getReferenceChunks,
   getReferences,
-  runProductFeature,
+  runProductFeatureDemo,
   getUnmatchedPdfs,
 } from "../api.js";
 import { appState } from "../state.js";
@@ -23,6 +23,7 @@ let useCampusNetwork = false;
 let userAuthorizedBrowser = false;
 let lastLiteratureRun = null;
 const tabs = ["引用", "文本块", "知识库条目", "RAG 查询", "文献任务", "论文请求", "文件", "未匹配 PDF"];
+const literatureRunNotice = "该功能入口已预留，当前后端尚未接入真实执行链路。当前只提供 demo_only 预览，不会访问外部文献源。";
 
 function tabButtons() {
   return `<div class="tabs">${tabs.map((tab) => `<button class="tab ${tab === activeTab ? "is-active" : ""}" type="button" data-library-tab="${tab}">${tab}</button>`).join("")}</div>`;
@@ -64,10 +65,11 @@ export async function renderLibraryView({ root }) {
           <label class="field-label">关键词<input class="search-input" id="literatureKeywords" lang="zh-CN" value="${escapeHtml(literatureKeywords)}" /></label>
           <label class="field-label">最大结果数<input class="search-input" id="literatureMax" lang="zh-CN" type="number" min="1" max="100" value="${escapeHtml(maxResults)}" /></label>
           <label class="check-row"><input id="literatureOaOnly" type="checkbox" ${includeOaOnly ? "checked" : ""} /> 仅开放获取</label>
-          <label class="check-row"><input id="literatureCampus" type="checkbox" ${useCampusNetwork ? "checked" : ""} /> 已授权校园网</label>
-          <label class="check-row"><input id="literatureBrowser" type="checkbox" ${userAuthorizedBrowser ? "checked" : ""} /> 已授权浏览器</label>
-          <button class="button primary" type="button" id="runLiteratureTask">运行</button>
+          <label class="check-row muted"><input id="literatureCampus" type="checkbox" disabled ${useCampusNetwork ? "checked" : ""} /> 已授权校园网 · not_connected</label>
+          <label class="check-row muted"><input id="literatureBrowser" type="checkbox" disabled ${userAuthorizedBrowser ? "checked" : ""} /> 已授权浏览器 · not_connected</label>
+          <button class="button secondary" type="button" id="runLiteratureTask" title="${escapeHtml(literatureRunNotice)}">预览 demo_only</button>
         </div>
+        <p class="muted">${escapeHtml(literatureRunNotice)}</p>
         <div id="literatureRunResult">${lastLiteratureRun ? jsonDetails("最新文献任务结果", lastLiteratureRun) : ""}</div>
       </div>
       <div class="panel pad" id="libraryContent">${emptyState("正在加载文献库", "正在读取项目证据记录。")}</div>
@@ -116,17 +118,9 @@ export async function renderLibraryView({ root }) {
     literatureKeywords = root.querySelector("#literatureKeywords").value;
     maxResults = Number(root.querySelector("#literatureMax").value || 10);
     includeOaOnly = root.querySelector("#literatureOaOnly").checked;
-    useCampusNetwork = root.querySelector("#literatureCampus").checked;
-    userAuthorizedBrowser = root.querySelector("#literatureBrowser").checked;
-    const result = await runProductFeature("literature_harvest_workflow", {
-      project_id: appState.activeProjectId,
-      mode: userAuthorizedBrowser || useCampusNetwork ? "normal" : "dry_run",
-      keywords: literatureKeywords,
-      max_results: maxResults,
-      include_oa_only: includeOaOnly,
-      use_campus_network: useCampusNetwork,
-      authorization: { browser: userAuthorizedBrowser, campus_network: useCampusNetwork },
-    });
+    useCampusNetwork = false;
+    userAuthorizedBrowser = false;
+    const result = await runProductFeatureDemo("literature_harvest_workflow", appState.activeProjectId);
     lastLiteratureRun = result.data || { ok: false, error: result.error };
     window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
     renderLibraryView({ root });

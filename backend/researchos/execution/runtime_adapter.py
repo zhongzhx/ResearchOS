@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,19 @@ def repo_root() -> Path:
 
 
 def runtime_skill_dir() -> Path:
-    return repo_root() / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime"
+    backend_runtime = repo_root() / "backend" / "research_agent_runtime"
+    if backend_runtime.exists():
+        return backend_runtime
+    legacy_runtime = repo_root() / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime"
+    if legacy_runtime.exists():
+        warnings.warn(
+            f"Deprecated ResearchOS runtime path fallback in use: {legacy_runtime}. "
+            f"Move runtime assets to {backend_runtime}.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return legacy_runtime
+    return backend_runtime
 
 
 def scripts_dir() -> Path:

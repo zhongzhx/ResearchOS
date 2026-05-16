@@ -29,6 +29,8 @@ export const appState = {
   pendingSkills: [],
   resolverHealth: null,
   conversationId: "",
+  sessionId: "",
+  conversationProjectId: "",
 };
 
 export function setProjects(projects) {
@@ -64,6 +66,14 @@ export function setDualAgentEnabled(enabled) {
 
 export function setConversationId(conversationId) {
   appState.conversationId = conversationId || "";
+}
+
+export function setSessionId(sessionId) {
+  appState.sessionId = sessionId || "";
+}
+
+export function setConversationProjectId(projectId) {
+  appState.conversationProjectId = projectId || "";
 }
 
 export function setPendingSkills(skills) {

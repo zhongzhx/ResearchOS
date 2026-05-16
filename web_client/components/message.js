@@ -25,15 +25,74 @@ export function plainMessage(role, body) {
   return `<article class="message ${escapeHtml(role)}"><div class="message-bubble">${escapeHtml(body)}</div></article>`;
 }
 
+function renderMarkdown(value) {
+  let html = escapeHtml(value);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/\n{2,}/g, "</p><p>");
+  html = html.replace(/\n/g, "<br>");
+  return html;
+}
+
+const INTERNAL_TASK_NOTICE = "该响应来自任务执行链路，已隐藏内部交接内容。请在实验模式或任务页查看详情。";
+
+function firstTextValue(values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const normalized = String(value).trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function internalHandoffSignals(value) {
+  const body = String(value || "");
+  return [
+    /Research Task Handoff/i.test(body) ? "Research Task Handoff" : "",
+    /\bTaskSpec\b/.test(body) ? "TaskSpec" : "",
+    /\bExecutionResult\b/.test(body) ? "ExecutionResult" : "",
+    /\bSkillRun\b/.test(body) ? "SkillRun" : "",
+    /\bPipeline\b/.test(body) ? "Pipeline" : "",
+    /\btask_[a-z0-9_-]+\b/i.test(body) ? "task_" : "",
+    /Final task status/i.test(body) ? "Final task status" : "",
+    /\bMemory\s*:/i.test(body) ? "Memory:" : "",
+    /Pending Skill/i.test(body) ? "Pending Skill" : "",
+  ].filter(Boolean);
+}
+
+function containsInternalHandoff(value) {
+  return internalHandoffSignals(value).length >= 2;
+}
+
+function hasStructuredTaskPayload(data) {
+  return Boolean(data?.task_spec || data?.execution_result || data?.research_task || data?.handoff || data?.handoff_summary || data?.raw_details?.TaskSpec);
+}
+
 function mainAnswer(data, fallback) {
-  const body = text(data?.answer || data?.summary || data?.message, fallback);
-  if (/Research Task Handoff/i.test(body)) {
-    return "AURA 返回了结构化研究任务交接内容。请打开双 Agent 实验模式查看。";
+  const body = firstTextValue([
+    data?.answer,
+    data?.content,
+    data?.message,
+    data?.response,
+    data?.text,
+    data?.result?.answer,
+    data?.data?.answer,
+    data?.summary,
+  ]);
+  if (containsInternalHandoff(body)) {
+    return INTERNAL_TASK_NOTICE;
   }
-  if (/traceback|stack trace|undefined|null/i.test(body) && body.length > 240) {
-    return "AURA 返回了内部错误。请在调试详情中查看后端响应。";
+  if (body) {
+    if (/traceback|stack trace|undefined|null/i.test(body) && body.length > 240) {
+      return "AURA 返回了内部错误。请在调试详情中查看后端响应。";
+    }
+    return body;
   }
-  return body;
+  if (hasStructuredTaskPayload(data)) {
+    return INTERNAL_TASK_NOTICE;
+  }
+  return text(fallback, "AURA 暂时没有返回回答。");
 }
 
 function answerSourceLabel(source) {
@@ -90,7 +149,7 @@ export function chatAnswerMessage(data, fallback = "AURA 暂时没有返回回�
   const badges = sourceBadge ? `<div class="badge-row">${sourceBadge}</div>` : "";
   const details = showDiagnostics ? [answerSourceDetails(data), taskStatusDetails(data)].join("") : "";
   return `<article class="message assistant"><div class="message-bubble">
-    <div class="assistant-summary"><p>${escapeHtml(answer)}</p>${badges}</div>
+    <div class="assistant-summary"><p>${renderMarkdown(answer)}</p>${badges}</div>
     ${details}
   </div></article>`;
 }
