@@ -188,7 +188,7 @@ def promote_skill_outputs_to_brain(result: ExecutionResult, task_spec: TaskSpec,
         accepted_targets = [target for target in accepted_targets if target != "claims"]
     else:
         accepted_targets = [target for target in accepted_targets if target != "claims" or claim_validation.get("valid", True)]
-    required_human_review = bool(rejected_items) or name == "browser_research_learning" or output_validation.get("required_human_review", False)
+    required_human_review = bool(rejected_items) or name in {"browser_research_learning", "writing_review"} or output_validation.get("required_human_review", False)
     return {
         "control_skill": "evidence-promotion",
         "project_id": task_spec.project_id,

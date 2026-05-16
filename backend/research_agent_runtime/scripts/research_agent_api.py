@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import re
-import secrets
 import subprocess
 import sys
 import threading
@@ -88,6 +86,12 @@ from runtime_common import (
     state_db,
     write_feedback,
 )
+from backend.researchos.config.env_loader import get_bool_env
+from backend.researchos.settings.llm_settings import delete_settings as delete_backend_llm_settings
+from backend.researchos.settings.llm_settings import get_llm_settings_summary as get_backend_llm_settings_summary
+from backend.researchos.settings.llm_settings import test_llm_settings as test_backend_llm_settings
+from backend.researchos.settings.llm_settings import update_llm_settings as update_backend_llm_settings
+from backend.researchos.settings.secret_store import redact_secrets_in_obj
 
 
 class RuntimeConfig:
@@ -137,7 +141,19 @@ def scheduler_enabled() -> bool:
 
 
 def dual_agent_api_enabled() -> bool:
-    return os.environ.get("RESEARCHOS_DUAL_AGENT_API_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    return get_bool_env("RESEARCHOS_DUAL_AGENT_API_ENABLED", False)
+
+
+def product_api_enabled() -> bool:
+    return get_bool_env("RESEARCHOS_PRODUCT_API_ENABLED", True)
+
+
+def memoryos_api_enabled() -> bool:
+    return get_bool_env("RESEARCHOS_MEMORYOS_ENABLED", True)
+
+
+def task_lifecycle_api_enabled() -> bool:
+    return get_bool_env("RESEARCHOS_TASK_LIFECYCLE_ENABLED", True)
 
 
 def is_dual_agent_get_path(path: str) -> bool:
@@ -153,12 +169,18 @@ def is_dual_agent_post_path(path: str) -> bool:
 
 
 def dual_agent_disabled_response(handler: BaseHTTPRequestHandler) -> None:
-    json_response(handler, 503, {"ok": False, "error": "dual_agent_api_disabled"})
+    disabled_response(handler, "dual_agent_api_disabled")
+
+
+def disabled_response(handler: BaseHTTPRequestHandler, reason: str) -> None:
+    json_response(handler, 503, {"ok": False, "status": "disabled", "error": reason, "reason": reason})
 
 
 def run_dual_agent_api(callback: Any) -> Any:
     previous = os.environ.get("RESEARCHOS_AGENT_ROOT")
+    previous_data = os.environ.get("RESEARCHOS_AGENT_DATA_DIR")
     os.environ["RESEARCHOS_AGENT_ROOT"] = str(CONFIG.agent_root)
+    os.environ["RESEARCHOS_AGENT_DATA_DIR"] = str(CONFIG.agent_root)
     try:
         return callback()
     finally:
@@ -166,6 +188,22 @@ def run_dual_agent_api(callback: Any) -> Any:
             os.environ.pop("RESEARCHOS_AGENT_ROOT", None)
         else:
             os.environ["RESEARCHOS_AGENT_ROOT"] = previous
+        if previous_data is None:
+            os.environ.pop("RESEARCHOS_AGENT_DATA_DIR", None)
+        else:
+            os.environ["RESEARCHOS_AGENT_DATA_DIR"] = previous_data
+
+
+def run_agent_data_service(callback: Any) -> Any:
+    previous_data = os.environ.get("RESEARCHOS_AGENT_DATA_DIR")
+    os.environ["RESEARCHOS_AGENT_DATA_DIR"] = str(CONFIG.agent_root)
+    try:
+        return callback()
+    finally:
+        if previous_data is None:
+            os.environ.pop("RESEARCHOS_AGENT_DATA_DIR", None)
+        else:
+            os.environ["RESEARCHOS_AGENT_DATA_DIR"] = previous_data
 
 
 def scheduler_loop() -> None:
@@ -222,219 +260,52 @@ def handle_error(handler: BaseHTTPRequestHandler, exc: Exception) -> None:
     except Exception:
         pass
     message = safe_error_message(exc)
-    if isinstance(exc, KeyError):
-        json_response(handler, 404, {"ok": False, "error": message.strip("'")})
-    elif isinstance(exc, (ValueError, FileNotFoundError, json.JSONDecodeError)):
-        json_response(handler, 400, {"ok": False, "error": message})
-    else:
-        json_response(handler, 500, {"ok": False, "error": message})
-
-
-def llm_settings_path() -> Path:
-    return CONFIG.agent_root / "config" / "llm_settings.json"
-
-
-def llm_settings_secret_path() -> Path:
-    return CONFIG.agent_root / "config" / ".llm_settings_key"
-
-
-def mask_secret(value: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if len(text) <= 8:
-        return f"{text[:2]}...{text[-2:]}"
-    return f"{text[:3]}...{text[-4:]}"
-
-
-def _local_secret() -> bytes:
-    path = llm_settings_secret_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(secrets.token_urlsafe(32), encoding="utf-8")
-        try:
-            path.chmod(0o600)
-        except Exception:
-            pass
-    return path.read_text(encoding="utf-8").encode("utf-8")
-
-
-def _protect_secret(value: str) -> str:
-    if not value:
-        return ""
-    key = _local_secret()
-    raw = value.encode("utf-8")
-    encrypted = bytes(byte ^ key[index % len(key)] for index, byte in enumerate(raw))
-    return base64.urlsafe_b64encode(encrypted).decode("ascii")
-
-
-def _unprotect_secret(value: str) -> str:
-    if not value:
-        return ""
-    try:
-        key = _local_secret()
-        raw = base64.urlsafe_b64decode(value.encode("ascii"))
-        decrypted = bytes(byte ^ key[index % len(key)] for index, byte in enumerate(raw))
-        return decrypted.decode("utf-8")
-    except Exception:
-        return ""
-
-
-def _read_saved_llm_settings() -> dict[str, Any]:
-    path = llm_settings_path()
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _public_llm_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in settings.items() if not key.endswith("_encrypted")}
-
-
-def _llm_env_settings() -> dict[str, str]:
-    provider = os.environ.get("LLM_PROVIDER") or ("openai-compatible" if os.environ.get("OPENAI_API_KEY") else "")
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY") or ""
-    return {
-        "provider": provider,
-        "model": os.environ.get("OPENAI_MODEL") or os.environ.get("LLM_MODEL") or "",
-        "base_url": os.environ.get("OPENAI_BASE_URL") or os.environ.get("LLM_BASE_URL") or "",
-        "api_key_masked": mask_secret(api_key),
+    provenance = {
+        "answer_source": "error_recovery",
+        "llm_called": False,
+        "llm_output_used": False,
+        "answer_overwritten_after_llm": False,
+        "llm_provider": "",
+        "llm_model": "",
+        "prompt_router_used": False,
+        "context_compiler_used": False,
+        "template_id": None,
+        "fallback_reason": "backend_exception",
     }
+    if isinstance(exc, KeyError):
+        json_response(handler, 404, {"ok": False, "error": message.strip("'"), **provenance})
+    elif isinstance(exc, (ValueError, FileNotFoundError, json.JSONDecodeError)):
+        json_response(handler, 400, {"ok": False, "error": message, **provenance})
+    else:
+        json_response(handler, 500, {"ok": False, "error": message, **provenance})
 
 
 def get_llm_settings_payload() -> dict[str, Any]:
-    saved = _read_saved_llm_settings()
-    env_settings = _llm_env_settings()
-    provider = str(saved.get("brain_provider") or saved.get("provider") or env_settings.get("provider") or "")
-    model = str(saved.get("brain_model") or saved.get("model") or env_settings.get("model") or "")
-    base_url = str(saved.get("brain_base_url") or saved.get("base_url") or env_settings.get("base_url") or "")
-    masked = str(saved.get("brain_api_key_masked") or saved.get("api_key_masked") or env_settings.get("api_key_masked") or "")
-    execution_masked = str(saved.get("execution_api_key_masked") or (masked if saved.get("mode") == "single_key" else ""))
-    settings = {
-        "mode": saved.get("mode") or "single_key",
-        "provider": provider,
-        "model": model,
-        "base_url": base_url,
-        "masked_key": masked,
-        "api_key_configured": bool(masked),
-        "brain_provider": provider,
-        "brain_model": model,
-        "brain_base_url": base_url,
-        "brain_api_key_masked": masked,
-        "execution_provider": saved.get("execution_provider") or provider,
-        "execution_model": saved.get("execution_model") or model,
-        "execution_base_url": saved.get("execution_base_url") or base_url,
-        "execution_api_key_masked": execution_masked,
-        "subscription_status": saved.get("subscription_status") or "not_configured",
-        "updated_at": saved.get("updated_at") or "",
-    }
-    return {"ok": True, **settings, "settings": settings}
+    return run_agent_data_service(get_backend_llm_settings_summary)
 
 
 def save_llm_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    existing = _read_saved_llm_settings()
-    mode = str(payload.get("mode") or "single_key").strip() or "single_key"
-    mode_aliases = {
-        "Single key for both agents": "single_key",
-        "Separate keys for Brain Agent and Execution Agent": "separate_keys",
-        "ResearchOS subscription": "subscription",
-    }
-    mode = mode_aliases.get(mode, mode)
-    provider = str(payload.get("brain_provider") or payload.get("provider") or existing.get("brain_provider") or "").strip()
-    model = str(payload.get("brain_model") or payload.get("model") or existing.get("brain_model") or "").strip()
-    base_url = str(payload.get("brain_base_url") or payload.get("base_url") or existing.get("brain_base_url") or "").strip()
-    api_key = str(payload.get("brain_api_key") or payload.get("api_key") or "").strip()
-    execution_provider = str(payload.get("execution_provider") or existing.get("execution_provider") or provider).strip()
-    execution_model = str(payload.get("execution_model") or existing.get("execution_model") or model).strip()
-    execution_base_url = str(payload.get("execution_base_url") or existing.get("execution_base_url") or base_url).strip()
-    execution_api_key = str(payload.get("execution_api_key") or "").strip()
-    if payload.get("clear_brain_api_key"):
-        brain_encrypted = ""
-        masked = ""
-    elif api_key:
-        brain_encrypted = _protect_secret(api_key)
-        masked = mask_secret(api_key)
-    else:
-        brain_encrypted = str(existing.get("brain_api_key_encrypted") or existing.get("api_key_encrypted") or "")
-        masked = str(existing.get("brain_api_key_masked") or existing.get("api_key_masked") or _llm_env_settings().get("api_key_masked") or "")
-    if mode == "single_key":
-        execution_encrypted = brain_encrypted
-        execution_masked = masked
-    elif payload.get("clear_execution_api_key"):
-        execution_encrypted = ""
-        execution_masked = ""
-    elif execution_api_key:
-        execution_encrypted = _protect_secret(execution_api_key)
-        execution_masked = mask_secret(execution_api_key)
-    else:
-        execution_encrypted = str(existing.get("execution_api_key_encrypted") or "")
-        execution_masked = str(existing.get("execution_api_key_masked") or "")
-    settings = {
-        "mode": mode,
-        "provider": provider,
-        "model": model,
-        "base_url": base_url,
-        "masked_key": masked,
-        "api_key_configured": bool(masked),
-        "brain_provider": provider,
-        "brain_model": model,
-        "brain_base_url": base_url,
-        "brain_api_key_masked": masked,
-        "brain_api_key_encrypted": brain_encrypted,
-        "execution_provider": execution_provider,
-        "execution_model": execution_model,
-        "execution_base_url": execution_base_url,
-        "execution_api_key_masked": execution_masked,
-        "execution_api_key_encrypted": execution_encrypted,
-        "subscription_status": "not_configured" if mode != "subscription" else str(payload.get("subscription_status") or existing.get("subscription_status") or "not_connected"),
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    path = llm_settings_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    result = run_agent_data_service(lambda: update_backend_llm_settings(payload))
     try:
-        path.chmod(0o600)
+        compatibility_path = CONFIG.agent_root / "config" / "llm_settings.json"
+        compatibility_path.parent.mkdir(parents=True, exist_ok=True)
+        compatibility_path.write_text(json.dumps(redact_secrets_in_obj(result.get("settings") or result), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        compatibility_path.chmod(0o600)
     except Exception:
         pass
-    return {"ok": True, "settings": _public_llm_settings(settings)}
+    return result
 
 
 def test_llm_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    use_configured_key = bool(payload.get("use_configured_key"))
-    saved = _read_saved_llm_settings() if use_configured_key else {}
-    provider = str(payload.get("brain_provider") or payload.get("provider") or saved.get("brain_provider") or "").strip()
-    model = str(payload.get("brain_model") or payload.get("model") or saved.get("brain_model") or "").strip()
-    base_url = str(payload.get("brain_base_url") or payload.get("base_url") or saved.get("brain_base_url") or "").strip()
-    api_key = str(payload.get("brain_api_key") or payload.get("api_key") or "").strip()
-    if not api_key and use_configured_key:
-        api_key = _unprotect_secret(str(saved.get("brain_api_key_encrypted") or ""))
-    if not api_key:
-        return {"ok": False, "error": "not_configured"}
-    adapter = research_os.LLMAdapter()
-    if provider:
-        adapter.provider = provider
-    if model:
-        adapter.model = model
-    if base_url:
-        adapter.base_url = base_url
-    adapter.api_key = api_key
-    try:
-        answer = adapter.chat_text("只回复：connection_ok", system_prompt="You are a connection test endpoint. Reply briefly.", temperature=0)
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": safe_error_message(exc)}
-    if not str(answer or "").strip():
-        return {"ok": False, "error": "empty_model_response"}
-    return {
-        "ok": True,
-        "provider": adapter.provider,
-        "model": adapter.model,
-        "base_url": adapter.base_url,
-        "message": "connection_ok",
-    }
+    target = str(payload.get("target") or "brain_agent")
+    result = run_agent_data_service(lambda: test_backend_llm_settings(target))
+    if result.get("status") == "not_configured":
+        result["error"] = "not_configured"
+    return result
+
+
+def delete_llm_settings_payload() -> dict[str, Any]:
+    return run_agent_data_service(delete_backend_llm_settings)
 
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -450,7 +321,18 @@ def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 def normalize_dual_agent_result(payload: dict[str, Any]) -> dict[str, Any]:
     source = payload.get("details") if isinstance(payload.get("details"), dict) else payload
     if source.get("answer") and not any(source.get(key) for key in ["task_spec", "execution_result", "details", "handoff", "handoff_summary"]):
-        return dict(source)
+        normalized_chat = dict(source)
+        normalized_chat.setdefault("answer_source", "coordinator_handoff")
+        normalized_chat.setdefault("llm_called", False)
+        normalized_chat.setdefault("llm_output_used", False)
+        normalized_chat.setdefault("answer_overwritten_after_llm", False)
+        normalized_chat.setdefault("llm_provider", "")
+        normalized_chat.setdefault("llm_model", "")
+        normalized_chat.setdefault("prompt_router_used", False)
+        normalized_chat.setdefault("context_compiler_used", False)
+        normalized_chat.setdefault("template_id", None)
+        normalized_chat.setdefault("fallback_reason", None)
+        return normalized_chat
     execution_result = source.get("execution_result") or payload.get("execution_result") or {}
     memory_update = (
         source.get("memory_update")
@@ -485,7 +367,272 @@ def normalize_dual_agent_result(payload: dict[str, Any]) -> dict[str, Any]:
     }
     for key, value in payload.items():
         normalized.setdefault(key, value)
+    normalized.setdefault("answer_source", "coordinator_handoff")
+    normalized.setdefault("llm_called", False)
+    normalized.setdefault("llm_output_used", False)
+    normalized.setdefault("answer_overwritten_after_llm", False)
+    normalized.setdefault("llm_provider", "")
+    normalized.setdefault("llm_model", "")
+    normalized.setdefault("prompt_router_used", False)
+    normalized.setdefault("context_compiler_used", False)
+    normalized.setdefault("template_id", "coordinator_run")
+    normalized.setdefault("fallback_reason", None)
     return normalized
+
+
+def chat_message_from_payload(payload: dict[str, Any]) -> str:
+    for key in ["message", "user_query", "query", "content"]:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def mvp_chat_payload_from_coordinator_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    message = chat_message_from_payload(payload)
+    forwarded = dict(payload)
+    if message:
+        forwarded["message"] = message
+    return forwarded
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _nonempty_mapping(value: Any) -> bool:
+    return isinstance(value, dict) and any(v not in (None, "", [], {}) for v in value.values())
+
+
+def _nonempty_sequence(value: Any) -> bool:
+    return isinstance(value, list) and len(value) > 0
+
+
+def _task_type_from_result(result: dict[str, Any]) -> str:
+    task_spec = result.get("task_spec") if isinstance(result.get("task_spec"), dict) else {}
+    execution_result = result.get("execution_result") if isinstance(result.get("execution_result"), dict) else {}
+    return str(result.get("task_type") or task_spec.get("task_type") or execution_result.get("task_type") or "").strip()
+
+
+def _placeholder_answer(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return True
+    lower = normalized.lower()
+    return (
+        "execution completed" in lower
+        or "task_type=research_planning" in lower
+        or normalized in {"completed", "success", "ok"}
+    )
+
+
+def _explicit_research_task_message(message: str) -> bool:
+    lower = message.lower()
+    explicit_terms = [
+        "collect literature",
+        "literature harvest",
+        "search papers",
+        "data analysis",
+        "analyze data",
+        "generate sop",
+        "build sop",
+        "design experiment",
+        "failure review",
+        "weekly report",
+        "skill",
+        "pipeline",
+        "task lifecycle",
+    ]
+    if any(term in lower for term in explicit_terms):
+        return True
+    return any(
+        term in message
+        for term in [
+            "文献采集",
+            "采集文献",
+            "检索文献",
+            "数据分析",
+            "分析数据",
+            "生成 SOP",
+            "实验设计",
+            "失败复盘",
+            "周报",
+            "技能",
+            "流水线",
+            "任务生命周期",
+        ]
+    )
+
+
+def _ordinary_chat_message(message: str) -> bool:
+    lower = message.lower()
+    if any(
+        term in message
+        for term in [
+            "你好",
+            "您好",
+            "正常回答",
+            "你是什么",
+            "你有什么记忆",
+            "记忆机制",
+            "记忆系统",
+            "对话记录",
+            "聊天记录",
+            "第一句话",
+            "刚才说了什么",
+            "我说过什么",
+            "你有什么功能",
+            "有什么功能",
+            "你能做什么",
+            "你能为我做什么",
+            "你可以为我做什么",
+            "怎么使用你",
+            "能力",
+            "介绍一下当前项目",
+            "介绍当前项目",
+            "当前项目是什么",
+        ]
+    ):
+        return True
+    ordinary_terms = [
+        "hello",
+        "hi",
+        "can you answer",
+        "are you working",
+        "what are you",
+        "current project",
+        "introduce the project",
+        "project introduction",
+        "memory mechanism",
+        "memory system",
+        "conversation history",
+        "first message",
+        "first thing i said",
+        "what can you do",
+        "what do you do",
+        "your capabilities",
+        "your features",
+        "capability",
+    ]
+    if any(term in lower for term in ordinary_terms):
+        return True
+    return any(
+        term in message
+        for term in [
+            "你好",
+            "正常回答",
+            "你是什么",
+            "你有什么记忆",
+            "记忆机制",
+            "记忆系统",
+            "对话记录",
+            "聊天记录",
+            "第一句话",
+            "第一句",
+            "刚才说了什么",
+            "我说过什么",
+            "你有什么功能",
+            "有什么功能",
+            "你能做什么",
+            "你能为我做什么",
+            "功能",
+            "能力",
+            "介绍一下当前项目",
+            "介绍当前项目",
+            "当前项目是什么",
+        ]
+    )
+
+
+def _empty_generated_research_planning_skill(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    name = str(value.get("name") or value.get("skill_name") or "").strip()
+    return name == "Generated Research Planning"
+
+
+def _placeholder_handoff_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and ("Research Task Handoff" in text or _placeholder_answer(text))
+
+
+def _coordinator_has_substantive_output(result: dict[str, Any]) -> bool:
+    execution_result = result.get("execution_result") if isinstance(result.get("execution_result"), dict) else {}
+    research_task = result.get("research_task") if isinstance(result.get("research_task"), dict) else {}
+    memory_update = result.get("memory_update") if isinstance(result.get("memory_update"), dict) else {}
+    memory_commit = result.get("memory_commit") if isinstance(result.get("memory_commit"), dict) else {}
+    validation_report = result.get("validation_report") if isinstance(result.get("validation_report"), dict) else {}
+    output_files = _as_list(result.get("output_files")) or _as_list(execution_result.get("output_files"))
+    artifacts = _as_list(result.get("artifacts")) or _as_list(research_task.get("artifacts")) or _as_list(execution_result.get("artifacts"))
+    memory_pages = _as_list(result.get("memory_pages")) or _as_list(memory_update.get("promoted_pages")) or _as_list(memory_update.get("written"))
+    pending_skill = result.get("pending_skill")
+    handoff = result.get("handoff") or result.get("handoff_summary")
+    task_lifecycle = result.get("task_lifecycle")
+
+    return any(
+        [
+            _nonempty_sequence(output_files),
+            _nonempty_sequence(artifacts),
+            _nonempty_sequence(memory_pages),
+            _nonempty_mapping(memory_update),
+            _nonempty_mapping(memory_commit),
+            _nonempty_mapping(pending_skill) and not _empty_generated_research_planning_skill(pending_skill),
+            _nonempty_mapping(validation_report) and not _placeholder_handoff_text(result.get("answer")),
+            _nonempty_mapping(task_lifecycle),
+            bool(str(handoff or "").strip()) and not _placeholder_handoff_text(handoff),
+        ]
+    )
+
+
+def coordinator_result_should_fallback(result: dict[str, Any], payload: dict[str, Any]) -> bool:
+    message = chat_message_from_payload(payload)
+    if _explicit_research_task_message(message):
+        return False
+    if str(result.get("intent") or "").strip() in {"general_chat", "model_identity", "unclear_chat"}:
+        return True
+    task_type = _task_type_from_result(result)
+    placeholder_task_type = task_type in {"research_planning", "generic", "general", "general_scientific_explanation"}
+    execution_result = result.get("execution_result") if isinstance(result.get("execution_result"), dict) else {}
+    summary = str(execution_result.get("summary") or result.get("summary") or "").strip()
+    answer = str(result.get("answer") or "").strip()
+    placeholder_summary = "execution completed" in summary.lower()
+    placeholder_answer = _placeholder_answer(answer)
+    lacks_substantive_output = not _coordinator_has_substantive_output(result)
+    no_effective_answer = not answer or placeholder_answer
+    if _ordinary_chat_message(message) and no_effective_answer:
+        return True
+
+    return bool(
+        (lacks_substantive_output and no_effective_answer)
+        or (placeholder_summary and lacks_substantive_output)
+        or (placeholder_task_type and lacks_substantive_output and (_ordinary_chat_message(message) or no_effective_answer))
+    )
+
+
+def coordinator_fallback_response(result: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    chat_payload = mvp_chat_payload_from_coordinator_payload(payload)
+    legacy = research_os.agent_chat(CONFIG.agent_root, chat_payload)
+    fallback = dict(legacy)
+    fallback["ok"] = bool(legacy.get("ok", True))
+    fallback["mode"] = "mvp_chat_fallback"
+    fallback["fallback_used"] = "mvp_agent_chat"
+    fallback["fallback_reason"] = "coordinator_placeholder_result"
+    fallback["coordinator_result"] = {
+        "hidden_in_ui": True,
+        "summary": result.get("summary") or ((result.get("execution_result") or {}).get("summary") if isinstance(result.get("execution_result"), dict) else ""),
+        "task_type": _task_type_from_result(result),
+    }
+    fallback.setdefault("answer_source", "fallback")
+    fallback.setdefault("llm_called", False)
+    fallback.setdefault("llm_output_used", False)
+    fallback.setdefault("answer_overwritten_after_llm", False)
+    fallback.setdefault("llm_provider", "")
+    fallback.setdefault("llm_model", "")
+    fallback.setdefault("prompt_router_used", False)
+    fallback.setdefault("context_compiler_used", False)
+    fallback.setdefault("template_id", None)
+    fallback.setdefault("fallback_reason", "coordinator_placeholder_result")
+    return redact_secrets_in_obj(fallback)
 
 
 def query_payload(query: dict[str, list[str]]) -> dict[str, Any]:
@@ -572,9 +719,13 @@ class Handler(BaseHTTPRequestHandler):
                 handle_error(self, exc)
             return
 
+        if path.startswith("/api/product/") and not product_api_enabled():
+            disabled_response(self, "product_api_disabled")
+            return
+
         if path == "/api/product/features":
             try:
-                from backend.researchos.product.feature_flows import list_product_features
+                from backend.researchos.integration.mvp_product_bridge import list_product_features
 
                 features = list_product_features()
                 json_response(self, 200, {"ok": True, "count": len(features), "features": features})
@@ -584,7 +735,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/product/features/") and path.endswith("/demo"):
             try:
-                from backend.researchos.product.feature_flows import run_product_feature_demo
+                from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
                 feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/demo").strip("/"))
                 project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
@@ -595,7 +746,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/product/features/"):
             try:
-                from backend.researchos.product.feature_flows import get_product_feature
+                from backend.researchos.integration.mvp_product_bridge import get_product_feature
 
                 feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").strip("/"))
                 json_response(self, 200, {"ok": True, "feature": get_product_feature(feature_id)})
@@ -605,12 +756,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/demo/product-flow":
             try:
-                from backend.researchos.product.feature_flows import run_product_feature_demo
+                from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
                 project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
                 json_response(self, 200, run_product_feature_demo("dual_agent_research_task", project_id=project_id))
             except Exception as exc:
                 handle_error(self, exc)
+            return
+
+        if path.startswith("/api/memory/") and not memoryos_api_enabled():
+            disabled_response(self, "memoryos_api_disabled")
             return
 
         if path.startswith("/api/memory/"):
@@ -1549,9 +1704,13 @@ class Handler(BaseHTTPRequestHandler):
                 handle_error(self, exc)
             return
 
+        if path.startswith("/api/product/") and not product_api_enabled():
+            disabled_response(self, "product_api_disabled")
+            return
+
         if path.startswith("/api/product/features/") and path.endswith("/run"):
             try:
-                from backend.researchos.product.feature_flows import run_product_feature
+                from backend.researchos.integration.mvp_product_bridge import run_product_feature
 
                 feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/run").strip("/"))
                 json_response(self, 200, run_product_feature(feature_id, payload))
@@ -1559,9 +1718,20 @@ class Handler(BaseHTTPRequestHandler):
                 handle_error(self, exc)
             return
 
+        if path.startswith("/api/product/features/") and path.endswith("/demo"):
+            try:
+                from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
+
+                feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/demo").strip("/"))
+                project_id = str(payload.get("project_id") or "demo_project")
+                json_response(self, 200, run_product_feature_demo(feature_id, project_id=project_id))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
         if path == "/api/demo/product-flow/run":
             try:
-                from backend.researchos.product.feature_flows import run_product_feature_demo
+                from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
                 project_id = str(payload.get("project_id") or "demo_project")
                 json_response(self, 200, run_product_feature_demo("dual_agent_research_task", project_id=project_id))
@@ -1574,9 +1744,17 @@ class Handler(BaseHTTPRequestHandler):
                 from backend.researchos.api import dual_agent_routes
 
                 result = run_dual_agent_api(lambda: dual_agent_routes.coordinator_run(payload))
-                json_response(self, 200, normalize_dual_agent_result(result))
+                normalized = normalize_dual_agent_result(result)
+                if coordinator_result_should_fallback(normalized, payload):
+                    json_response(self, 200, coordinator_fallback_response(normalized, payload))
+                    return
+                json_response(self, 200, normalized)
             except Exception as exc:
                 handle_error(self, exc)
+            return
+
+        if path.startswith("/api/memory/") and not memoryos_api_enabled():
+            disabled_response(self, "memoryos_api_disabled")
             return
 
         if path.startswith("/api/memory/"):
@@ -2607,6 +2785,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         try:
+            if path == "/api/settings/llm":
+                json_response(self, 200, delete_llm_settings_payload())
+                return
             if path.startswith("/memory/"):
                 memory_id = path.split("/")[2]
                 json_response(self, 200, memory_api.delete_memory(CONFIG.agent_root, memory_id))

@@ -13,7 +13,14 @@ from .research_task import ResearchTask
 
 
 def default_task_root() -> Path:
-    return Path(os.environ.get("RESEARCHOS_TASKS_ROOT") or repo_root() / "data" / "research_tasks")
+    if os.environ.get("RESEARCHOS_TASKS_ROOT"):
+        return Path(os.environ["RESEARCHOS_TASKS_ROOT"])
+    try:
+        from backend.researchos.config.paths import get_research_tasks_dir
+
+        return get_research_tasks_dir()
+    except Exception:
+        return repo_root() / "data" / "research_tasks"
 
 
 def _json_safe(value: Any) -> Any:

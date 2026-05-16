@@ -306,6 +306,14 @@ class ResearchBrainAgent:
             "workflow_template": workflow_template,
         }
 
+    def call_llm(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        from backend.researchos.llm.gateway import call_llm
+        from backend.researchos.prompts.mvp_prompt_adapter import load_mvp_system_prompt
+
+        system = load_mvp_system_prompt()
+        scoped_messages = [{"role": "system", "content": system}, *messages]
+        return call_llm("brain_agent", scoped_messages, **kwargs)
+
     def compose_user_response(self, result: ExecutionResult, decision: BrainDecision) -> dict[str, Any]:
         return {
             "ok": result.status in {"success", "partial_success"},
@@ -424,9 +432,12 @@ def is_unclear_short_input(user_query: str) -> bool:
 
 
 def model_identity_response() -> dict[str, Any]:
-    provider = os.environ.get("LLM_PROVIDER") or ("openai-compatible" if os.environ.get("OPENAI_API_KEY") else "mock")
-    model = os.environ.get("LLM_MODEL") or os.environ.get("OPENAI_MODEL") or ""
-    base_url = os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or ""
+    from backend.researchos.llm.gateway import get_llm_config_for_agent
+
+    config = get_llm_config_for_agent("brain_agent")
+    provider = config.get("provider") or "not_configured"
+    model = config.get("model") or ""
+    base_url = config.get("base_url") or ""
     if model:
         answer = f"当前后端连接的是 {provider} 模型接口，模型名是 {model}。"
     else:

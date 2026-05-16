@@ -69,11 +69,11 @@
 - Modify: `backend/researchos/agents/brain_agent.py`
 - Modify: `backend/researchos/agents/coordinator.py`
 - Modify: `backend/researchos/api/dual_agent_routes.py`
-- Modify: `skills/researchos_skill_library/01_core_runtime_memory/research-agent-runtime/scripts/research_agent_api.py`
+- Modify: `backend/research_agent_runtime/scripts/research_agent_api.py`
 - Test: `tests/test_memoryos_integration.py`
 
 - [ ] Write failing integration tests for promotion -> MemoryEvent/MemoryItem, task completion -> episode/cognitive refresh, API no secrets, and legacy isolation.
 - [ ] Connect promoted memory commit to MemoryOS and add safe API handlers.
 - [ ] Run targeted integration tests.
 - [ ] Run `py -m unittest discover -s tests -p "test_*.py"`.
-- [ ] Run `$env:LLM_PROVIDER='mock'; py -m unittest discover -s research-agent-runtime\scripts\tests -p "test_research_os_mvp.py"` if that path exists, otherwise run the equivalent skill runtime test path under `skills/researchos_skill_library/01_core_runtime_memory/research-agent-runtime/scripts/tests`.
+- [ ] Run `$env:LLM_PROVIDER='mock'; py -m unittest discover -s backend\research_agent_runtime\scripts\tests -p "test_research_os_mvp.py"`.

@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -10,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime" / "scripts"
+SCRIPTS = ROOT / "backend" / "research_agent_runtime" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -22,6 +23,21 @@ class SettingsLlmApiTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="aura_llm_settings_"))
         self.agent_root = self.tmp / "agent_data"
         self.previous_config = getattr(api, "CONFIG", None)
+        self.previous_env = {
+            key: os.environ.get(key)
+            for key in [
+                "LLM_PROVIDER",
+                "LLM_API_KEY",
+                "LLM_BASE_URL",
+                "LLM_MODEL",
+                "MINIMAX_API_KEY",
+                "OPENAI_API_KEY",
+                "BRAIN_AGENT_API_KEY",
+                "EXECUTION_AGENT_API_KEY",
+            ]
+        }
+        for key in self.previous_env:
+            os.environ[key] = ""
         api.CONFIG = api.RuntimeConfig(self.agent_root)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -34,6 +50,11 @@ class SettingsLlmApiTests(unittest.TestCase):
         self.server.server_close()
         if self.previous_config is not None:
             api.CONFIG = self.previous_config
+        for key, value in self.previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _get_json(self, path: str) -> dict:

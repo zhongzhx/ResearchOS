@@ -968,6 +968,10 @@ def compile_research_context(agent_root: Path, payload: dict[str, Any]) -> dict[
     terms = terms_for_query(user_message)
     context_intent = effective_context_intent(intent, user_message)
     sections = context_sections_for_intent(context_intent)
+    suppress_task_status = _truthy(payload.get("suppress_task_status")) and context_intent != "status_query"
+    if suppress_task_status:
+        sections = set(sections)
+        sections.discard("tasks")
     warnings: list[str] = []
     items: list[dict[str, Any]] = []
     task_status: list[dict[str, Any]] = []

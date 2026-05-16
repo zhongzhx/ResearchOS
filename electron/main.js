@@ -6,17 +6,14 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const WEB_ROOT = path.join(ROOT, "web_client");
-const LEGACY_API_SCRIPT = path.join(ROOT, "research-agent-runtime", "scripts", "research_agent_api.py");
 const CANONICAL_API_SCRIPT = path.join(
   ROOT,
-  "skills",
-  "researchos_skill_library",
-  "01_core_runtime_memory",
-  "research-agent-runtime",
+  "backend",
+  "research_agent_runtime",
   "scripts",
   "research_agent_api.py",
 );
-const API_SCRIPT = fs.existsSync(LEGACY_API_SCRIPT) ? LEGACY_API_SCRIPT : CANONICAL_API_SCRIPT;
+const API_SCRIPT = CANONICAL_API_SCRIPT;
 const AGENT_ROOT = process.env.RESEARCHOS_AGENT_ROOT || path.join(ROOT, "agent_data");
 const API_HOST = process.env.RESEARCHOS_HOST || "127.0.0.1";
 const API_PORT = Number(process.env.RESEARCHOS_PORT || "8765");
@@ -141,32 +138,53 @@ function proxyBackend(request, response) {
   const parsed = new URL(request.url, "http://127.0.0.1");
   const suffix = parsed.pathname.replace(/^\/api\/backend/, "") || "/";
   const targetPath = `${suffix}${parsed.search}`;
-  const proxy = http.request(
-    `${API_BASE_URL}${targetPath}`,
-    {
-      method: request.method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": request.headers["content-type"] || "application/json",
-      },
-    },
-    (backendResponse) => {
-      response.writeHead(backendResponse.statusCode || 502, {
-        "Content-Type": backendResponse.headers["content-type"] || "application/json; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      backendResponse.pipe(response);
-    },
-  );
-  proxy.on("error", (error) => {
+  const chunks = [];
+  let bodySize = 0;
+  const failProxy = (error, statusCode = 502) => {
     const body = Buffer.from(JSON.stringify({ error: error.message, backend: API_BASE_URL }, null, 2));
-    response.writeHead(502, {
+    response.writeHead(statusCode, {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Length": body.length,
     });
     response.end(body);
+  };
+
+  request.on("data", (chunk) => {
+    bodySize += chunk.length;
+    if (bodySize > 1024 * 1024) {
+      request.destroy(new Error("request body too large"));
+      return;
+    }
+    chunks.push(chunk);
   });
-  request.pipe(proxy);
+  request.on("error", (error) => failProxy(error, 400));
+  request.on("end", () => {
+    const body = Buffer.concat(chunks);
+    const headers = {
+      Accept: request.headers.accept || "application/json",
+      "Content-Type": request.headers["content-type"] || "application/json",
+      "Content-Length": body.length,
+    };
+    const proxy = http.request(
+      `${API_BASE_URL}${targetPath}`,
+      {
+        method: request.method,
+        headers,
+      },
+      (backendResponse) => {
+        response.writeHead(backendResponse.statusCode || 502, {
+          "Content-Type": backendResponse.headers["content-type"] || "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        backendResponse.pipe(response);
+      },
+    );
+    proxy.on("error", (error) => failProxy(error));
+    if (body.length) {
+      proxy.write(body);
+    }
+    proxy.end();
+  });
 }
 
 function startWebServer() {

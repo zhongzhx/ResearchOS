@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "research-agent-runtime" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "backend" / "research_agent_runtime" / "scripts"))
 from lab_agent_features import add_research_interest, generate_weekly_digest, list_research_interests  # noqa: E402
 
 

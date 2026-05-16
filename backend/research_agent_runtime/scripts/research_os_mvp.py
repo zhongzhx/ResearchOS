@@ -34,6 +34,7 @@ from researchos_core_skills import (
     integration_counts,
     tool_capability_skills,
 )
+from runtime_paths import core_runtime_memory_root, repo_root
 
 
 def load_env_file(path: Path) -> None:
@@ -50,8 +51,9 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-load_env_file(WORKSPACE_ROOT / ".env")
+REPO_ROOT = repo_root()
+WORKSPACE_ROOT = core_runtime_memory_root()
+load_env_file(REPO_ROOT / ".env")
 load_env_file(Path(__file__).resolve().parent / ".env")
 
 
@@ -115,6 +117,7 @@ DEFAULT_SERVER_LLM_PROVIDER = "mock"
 DEFAULT_SERVER_LLM_BASE_URL = ""
 DEFAULT_SERVER_LLM_MODEL = ""
 DEFAULT_SERVER_LLM_API_KEY = ""
+LLM_SENTINEL_OUTPUT = "SENTINEL_MODEL_OUTPUT_ResearchOS_12345"
 CLAIM_TYPES = {"result", "conclusion", "limitation", "next_step", "unsupported_conclusion", "risk", "hypothesis"}
 CLAIM_STATUSES = {"draft", "weak", "unsupported", "inference", "needs_more_evidence", "confirmed", "rejected", "superseded"}
 CLAIM_EVIDENCE_TYPES = {
@@ -6402,8 +6405,11 @@ class LLMAdapter:
         }
 
     def chat_text(self, prompt: str, system_prompt: str = "", temperature: float = 0.1) -> str:
+        sentinel_enabled = os.environ.get("TEST_LLM_SENTINEL", "").strip().lower() in {"1", "true", "yes", "on"}
+        if self.provider == "mock" or sentinel_enabled:
+            return LLM_SENTINEL_OUTPUT
         if self.mode == "mock":
-            return "本地 mock 模型回复：已读取项目记忆、知识库和工具上下文。请配置后端 LLM 环境变量以启用真实模型。"
+            return "needs_llm_configuration: backend LLM provider is configured but no API key is available."
         if self.provider in {"minimax", "openai", "openai-compatible", "custom", "local"}:
             url = self.base_url.rstrip("/") or "https://api.openai.com/v1"
             last_error = ""
@@ -9233,7 +9239,7 @@ def _parse_literature_task_notes(value: Any) -> dict[str, Any]:
 
 
 def keyword_harvest_skill_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "keyword-research-harvest"
+    return REPO_ROOT / "skills" / "researchos_skill_library" / "02_literature_browser_ingestion" / "keyword-research-harvest"
 
 
 def keyword_harvest_runs_root(agent_root: Path, project_id: str) -> Path:
@@ -16210,9 +16216,9 @@ def get_researchos_capability_status(agent_root: Path, project_id: str = "") -> 
         else:
             set_detail("response_formatter", "partial", ["formatters exist", "agent_chat wiring not fully confirmed"])
 
-        electron_path = WORKSPACE_ROOT / "electron" / "main.js"
-        web_client_path = WORKSPACE_ROOT / "web_client" / "index.html"
-        api_client_path = WORKSPACE_ROOT / "web_client" / "api.js"
+        electron_path = REPO_ROOT / "electron" / "main.js"
+        web_client_path = REPO_ROOT / "web_client" / "index.html"
+        api_client_path = REPO_ROOT / "web_client" / "api.js"
         if electron_path.exists() and web_client_path.exists():
             try:
                 electron_text = electron_path.read_text(encoding="utf-8", errors="ignore")
@@ -16332,14 +16338,21 @@ def get_demo_runtime_status(agent_root: Path | str, project_id: str = "") -> dic
     return status
 
 
+def sanitizer_requires_answer_rewrite(answer: str, message: str = "") -> bool:
+    text = clean(answer)
+    if not text:
+        return False
+    leaked = any(phrase.lower() in text.lower() for phrase in AGENT_LEAKAGE_PHRASES)
+    too_long = len(text) > 900 and not explicit_longform_request(message)
+    markdown_table = "|" in text and re.search(r"\n\s*\|?\s*[-:]{3,}\s*\|", text) is not None and not explicit_longform_request(message)
+    return bool(leaked or too_long or markdown_table)
+
+
 def sanitize_agent_answer(answer: str, intent: str, *, task_status: list[dict[str, Any]] | None = None, message: str = "", workspace: dict[str, Any] | None = None) -> str:
     text = clean(answer)
     if not text:
         return ""
-    leaked = any(phrase.lower() in text.lower() for phrase in AGENT_LEAKAGE_PHRASES)
-    too_long = len(text) > 900 and not explicit_longform_request(message)
-    markdown_table = "|" in text and re.search(r"\n\s*\|?\s*[-:]{3,}\s*\|", text) is not None and not explicit_longform_request(message)
-    if not leaked and not too_long and not markdown_table:
+    if not sanitizer_requires_answer_rewrite(text, message):
         return polish_user_facing_answer(text, message)
     if intent == "task_status_query":
         return polish_user_facing_answer(format_task_status_answer(task_status or []), message)
@@ -16381,9 +16394,199 @@ def unwrap_llm_chat_answer(raw_answer: str) -> str:
     return raw_answer
 
 
+def chat_message_from_payload(payload: dict[str, Any]) -> str:
+    for key in ["message", "user_query", "query", "content", "question"]:
+        value = payload.get(key)
+        if value is not None and clean(value):
+            return clean(value)
+    return ""
+
+
+def payload_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return clean(value).lower() in {"1", "true", "yes", "on"}
+
+
+ANSWER_SOURCE_VALUES = {
+    "llm",
+    "template",
+    "fallback",
+    "validator_rewrite",
+    "sanitizer_rewrite",
+    "coordinator_handoff",
+    "product_demo",
+    "cache",
+    "error_recovery",
+}
+
+
+def answer_provenance_fields(
+    *,
+    answer_source: str,
+    llm_called: bool = False,
+    llm_output_used: bool = False,
+    answer_overwritten_after_llm: bool = False,
+    llm_provider: str = "",
+    llm_model: str = "",
+    prompt_router_used: bool = False,
+    context_compiler_used: bool = False,
+    template_id: str | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    source = clean(answer_source)
+    if source not in ANSWER_SOURCE_VALUES:
+        source = "fallback"
+    return {
+        "answer_source": source,
+        "llm_called": bool(llm_called),
+        "llm_output_used": bool(llm_output_used),
+        "answer_overwritten_after_llm": bool(answer_overwritten_after_llm),
+        "llm_provider": clean(llm_provider),
+        "llm_model": clean(llm_model),
+        "prompt_router_used": bool(prompt_router_used),
+        "context_compiler_used": bool(context_compiler_used),
+        "template_id": template_id if template_id is None else clean(template_id),
+        "fallback_reason": fallback_reason if fallback_reason is None else clean(fallback_reason),
+    }
+
+
+def attach_answer_provenance(response: dict[str, Any], *, default_source: str = "template") -> dict[str, Any]:
+    source = clean(response.get("answer_source")) or default_source
+    llm_meta = response.get("llm") if isinstance(response.get("llm"), dict) else {}
+    tool_calls = response.get("tool_calls") if isinstance(response.get("tool_calls"), list) else []
+    context_used = any(isinstance(call, dict) and clean(call.get("tool")) == "research_context_compiler" for call in tool_calls)
+    response.update(
+        answer_provenance_fields(
+            answer_source=source,
+            llm_called=bool(response.get("llm_called")),
+            llm_output_used=bool(response.get("llm_output_used")),
+            answer_overwritten_after_llm=bool(response.get("answer_overwritten_after_llm")),
+            llm_provider=clean(response.get("llm_provider")) or clean(llm_meta.get("provider")),
+            llm_model=clean(response.get("llm_model")) or clean(llm_meta.get("model")),
+            prompt_router_used=bool(response.get("prompt_router_used")),
+            context_compiler_used=bool(response.get("context_compiler_used")) or context_used,
+            template_id=response.get("template_id") if "template_id" in response else (clean(response.get("response_mode")) or clean(response.get("intent")) or None),
+            fallback_reason=response.get("fallback_reason"),
+        )
+    )
+    if response["answer_source"] == "llm":
+        response["template_id"] = None
+        response["fallback_reason"] = None
+    return response
+
+
+def should_use_llm_for_ordinary_chat(message: str, intent: str = "", canonical_intent: str = "") -> bool:
+    text = clean(message)
+    lower = text.lower()
+    if not text:
+        return False
+    local_status_terms = ["/health", "显示系统状态", "显示后端状态", "show system status", "runtime status", "llm-status"]
+    if any(term in lower for term in local_status_terms) or any(term in text for term in ["显示系统状态", "显示后端状态"]):
+        return False
+    compact = re.sub(r"[\s\?？!！。,.，、:：;；]+", "", text).lower()
+    exact = {
+        "你好",
+        "您好",
+        "你可以为我做什么",
+        "你是什么",
+        "介绍一下researchos",
+        "怎么使用你",
+        "你能帮我做什么",
+        "你能为我做什么",
+        "当前系统正常吗",
+        "介绍一下当前项目",
+        "介绍当前项目",
+        "你有什么功能",
+    }
+    if compact in exact:
+        return True
+    if compact.startswith("你好") and ("正常回答" in text or len(compact) <= 16):
+        return True
+    if compact.startswith("您好") and len(compact) <= 16:
+        return True
+    english_terms = [
+        "hello",
+        "hi",
+        "what can you do",
+        "what are you",
+        "who are you",
+        "how do i use you",
+        "introduce researchos",
+        "introduce the current project",
+        "current project introduction",
+        "are you working",
+        "can you answer",
+    ]
+    if lower.strip(" ?!.") in english_terms:
+        return True
+    return False
+
+
+def should_include_full_task_status(payload: dict[str, Any], message: str, intent: str) -> bool:
+    payload_intent = clean(payload.get("intent"))
+    if payload_truthy(payload.get("include_task_status")):
+        return True
+    if payload_intent == "refresh_task_status":
+        return True
+    if intent in STATUS_QUERY_INTENTS or intent == "task_status_query":
+        return True
+    return False
+
+
+def should_suppress_task_status_for_chat(response_mode: str, include_full_task_status: bool) -> bool:
+    return not include_full_task_status and clean(response_mode) != "task_status"
+
+
+def is_product_demo_task_status(item: dict[str, Any]) -> bool:
+    name = clean(item.get("task_name") or item.get("skill_name"))
+    skill_id = clean(item.get("skill_id"))
+    return name == "ResearchOS Product Demo" or skill_id.startswith("product_demo_")
+
+
+def summarize_task_status_for_chat(task_status: list[dict[str, Any]] | None) -> dict[str, Any]:
+    items = [item for item in as_list(task_status) if isinstance(item, dict) and not is_product_demo_task_status(item)]
+    running = [item for item in items if clean(item.get("status")) in {"running", "pending", "waiting_approval", "waiting_for_user"}]
+    failed = [item for item in items if clean(item.get("status")) in {"failed", "cancelled"}]
+    latest = running[0] if running else (items[0] if items else {})
+    latest_summary = ""
+    if latest:
+        latest_summary = f"{clean(latest.get('task_name')) or clean(latest.get('task_type'))}: {clean(latest.get('status')) or 'unknown'}"
+    return {
+        "running_task_count": len(running),
+        "failed_task_count": len(failed),
+        "latest_task_summary": latest_summary,
+    }
+
+
+def compact_workspace_state_for_chat(workspace: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(workspace, dict):
+        return {}
+    compacted = dict(workspace)
+    tasks = workspace.get("tasks") if isinstance(workspace.get("tasks"), dict) else {}
+    task_items: list[dict[str, Any]] = []
+    for key in ["running", "completed", "failed"]:
+        task_items.extend([item for item in as_list(tasks.get(key)) if isinstance(item, dict)])
+    compacted["task_status_summary"] = summarize_task_status_for_chat(task_items)
+    compacted.pop("tasks", None)
+    skills = dict(compacted.get("skills") or {}) if isinstance(compacted.get("skills"), dict) else {}
+    if skills:
+        recent = [
+            item
+            for item in as_list(skills.get("recent_skill_runs"))
+            if isinstance(item, dict) and not is_product_demo_task_status({"task_name": item.get("skill_name"), "skill_id": item.get("skill_id")})
+        ]
+        if recent:
+            skills["recent_skill_runs"] = recent[:5]
+        else:
+            skills.pop("recent_skill_runs", None)
+        compacted["skills"] = skills
+    return compacted
+
+
 def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     project_id = clean(payload.get("project_id"))
-    message = clean(payload.get("message") or payload.get("query") or payload.get("question"))
+    message = chat_message_from_payload(payload)
     if not project_id:
         raise ValueError("project_id is required")
     if not message:
@@ -16396,6 +16599,10 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     previous_intent = clean(payload.get("previous_intent")) or latest_chat_intent(history_before)
     canonical_intent = classify_research_intent(message, previous_intent)
     intent = "conversation_history_query" if is_conversation_history_query(message) else infer_agent_intent(message, previous_intent)
+    if clean(payload.get("intent")) == "refresh_task_status":
+        intent = "task_status_query"
+    force_ordinary_llm_chat = should_use_llm_for_ordinary_chat(message, intent, canonical_intent)
+    include_full_task_status = False if force_ordinary_llm_chat else should_include_full_task_status(payload, message, intent)
     detected_literature_keywords = extract_literature_keywords_from_message(message)
     last_literature_keywords = latest_literature_keywords_from_history(history_before)
     if intent != "start_skill_request" and is_direct_literature_start_message(message) and last_literature_keywords:
@@ -16430,8 +16637,9 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "data_analysis",
         "artifact_generation",
         "weekly_digest_generation",
+        "general_chat",
     }
-    if intent not in non_harvest_intents and detected_literature_keywords and canonical_intent == "literature_harvest_start":
+    if not force_ordinary_llm_chat and intent not in non_harvest_intents and detected_literature_keywords and canonical_intent == "literature_harvest_start":
         intent = "literature_harvest_prepare"
     save_chat_message(
         agent_root,
@@ -16446,12 +16654,26 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         response["conversation_id"] = conversation_id
         response.setdefault("canonical_intent", canonical_intent)
         response.setdefault("response_mode", response_mode_for_intent(clean(response.get("intent")) or intent))
+        attach_answer_provenance(response, default_source="template")
+        response_mode = clean(response.get("response_mode"))
+        if should_suppress_task_status_for_chat(response_mode, include_full_task_status):
+            task_status = response.get("task_status") if isinstance(response.get("task_status"), list) else []
+            response["task_status_summary"] = summarize_task_status_for_chat(task_status)
+            response.pop("task_status", None)
+            response.pop("user_visible_task_status", None)
+            if isinstance(response.get("workspace_state"), dict):
+                response["workspace_state"] = compact_workspace_state_for_chat(response.get("workspace_state"))
         if "task_status" in response and "user_visible_task_status" not in response:
             response["user_visible_task_status"] = research_context_compiler.build_user_visible_task_status(
                 response.get("task_status") if isinstance(response.get("task_status"), list) else []
             )
         if clean(response.get("answer")):
-            response["answer"] = apply_response_policy(str(response.get("answer") or ""), clean(response.get("response_mode")), message, developer_debug=developer_debug)
+            before_policy = str(response.get("answer") or "")
+            response["answer"] = apply_response_policy(before_policy, clean(response.get("response_mode")), message, developer_debug=developer_debug)
+            if bool(response.get("llm_called")) and clean(response.get("answer")) != clean(before_policy):
+                response["answer_source"] = "sanitizer_rewrite"
+                response["llm_output_used"] = False
+                response["answer_overwritten_after_llm"] = True
         if not developer_debug:
             response.pop("debug", None)
         answer_text = clean(response.get("answer"))
@@ -16651,6 +16873,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "conversation_state": {**(payload.get("conversation_state") or {}), "conversation_id": conversation_id, "recent_messages": history_before[-10:]},
             "max_tokens": int(payload.get("max_context_tokens") or payload.get("max_tokens") or 2000),
             "developer_debug": developer_debug,
+            "suppress_task_status": force_ordinary_llm_chat or should_suppress_task_status_for_chat(response_mode_for_intent(intent), include_full_task_status),
         },
     )
     compiler_call = {"tool": "research_context_compiler", "status": "completed"}
@@ -16785,7 +17008,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "error": None,
         })
 
-    if intent in {"capability_query", "capability_explanation"}:
+    if intent in {"capability_query", "capability_explanation"} and not force_ordinary_llm_chat:
         catalog = build_capability_catalog(agent_root, project_id)
         return finalize({
             "ok": True,
@@ -16825,7 +17048,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "error": None,
         })
 
-    if intent == "self_description_or_architecture":
+    if intent == "self_description_or_architecture" and not force_ordinary_llm_chat:
         return finalize({
             "ok": True,
             "intent": intent,
@@ -17178,7 +17401,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "error": None,
         })
 
-    if intent == "task_status_query":
+    if intent == "task_status_query" and not force_ordinary_llm_chat:
         task_status = latest_task_status(agent_root, project_id, limit=8)
         actions = agent_next_actions(intent, workspace, task_status)
         return finalize({
@@ -17197,7 +17420,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "error": None,
         })
 
-    if intent in {"project_status", "project_status_query"}:
+    if intent in {"project_status", "project_status_query"} and not force_ordinary_llm_chat:
         project_status = get_project_status(agent_root, project_id)
         task_status = context_bundle.get("task_status", [])
         artifact_summary = workspace.get("artifact_summary") or {}
@@ -17447,10 +17670,30 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     system_prompt = runtime_prompt["system_prompt"] + "\n\n" + AGENT_RESPONSE_CONSTRAINT_ZH + "\n" + AGENT_RESPONSE_CONSTRAINT_EN
     raw_answer = llm.chat_text(prompt, system_prompt=system_prompt, temperature=float(payload.get("temperature") or 0.1))
     answer = unwrap_llm_chat_answer(raw_answer)
+    answer_source = "llm"
+    llm_called = True
+    llm_output_used = True
+    answer_overwritten_after_llm = False
+    fallback_reason: str | None = None
     if not answer:
         answer = "未获得模型回答。请检查后端 LLM 环境变量或本地服务状态。"
+        answer_source = "fallback"
+        llm_output_used = False
+        fallback_reason = "empty_llm_output"
+    elif clean(answer).startswith("needs_llm_configuration"):
+        answer = "needs_llm_configuration: 请先在设置页配置后端 LLM API key、模型和 Base URL，然后重试 ResearchOS 对话。"
+        answer_source = "fallback"
+        llm_called = False
+        llm_output_used = False
+        fallback_reason = "needs_llm_configuration"
     task_status = context_bundle.get("task_status", [])
-    answer = sanitize_agent_answer(answer, intent, task_status=task_status, message=message, workspace=workspace)
+    sanitizer_forced_rewrite = sanitizer_requires_answer_rewrite(answer, message)
+    sanitized_answer = sanitize_agent_answer(answer, intent, task_status=task_status, message=message, workspace=workspace)
+    if sanitizer_forced_rewrite and clean(sanitized_answer) != clean(answer):
+        answer_source = "sanitizer_rewrite"
+        llm_output_used = False
+        answer_overwritten_after_llm = True
+    answer = sanitized_answer
     answer = ensure_answer_citations(answer, citations, message=message)
 
     validation = canonical_memory.validate_research_answer(
@@ -17492,6 +17735,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     return finalize({
         "ok": True,
         "intent": intent,
+        "response_mode": "normal_answer" if force_ordinary_llm_chat else response_mode_for_intent(intent),
         "answer": answer,
         "citations": citations,
         "memory_used": memory_used,
@@ -17510,10 +17754,21 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "workspace_state": workspace,
             "prompt_routing": {key: value for key, value in runtime_prompt.items() if key != "system_prompt"},
             "llm": {"provider": llm.provider, "model": llm.model, "mode": llm.mode},
+            "raw_llm_output_preview": clean(raw_answer)[:500] if developer_debug else "",
         },
         "error": None,
         "matched_skill": chat_skill_name,
         "llm": {"provider": llm.provider, "model": llm.model, "mode": llm.mode},
+        "answer_source": answer_source,
+        "llm_called": llm_called,
+        "llm_output_used": llm_output_used,
+        "answer_overwritten_after_llm": answer_overwritten_after_llm,
+        "llm_provider": llm.provider,
+        "llm_model": llm.model,
+        "prompt_router_used": True,
+        "context_compiler_used": True,
+        "template_id": None,
+        "fallback_reason": fallback_reason,
     })
 
 
@@ -19788,7 +20043,7 @@ def _optional_memory_backend_files(agent_root: Path) -> dict[str, dict[str, Any]
         "agent_memory.sqlite": {"path": str(root / "agent_memory.sqlite"), "exists": (root / "agent_memory.sqlite").exists(), "required_for_answers": False},
         "lab_agent_mvp.sqlite": {"path": str(root / "lab_agent_mvp.sqlite"), "exists": (root / "lab_agent_mvp.sqlite").exists(), "required_for_answers": False},
         "manage-agent-memory folder": {"path": str(WORKSPACE_ROOT / "manage-agent-memory"), "exists": (WORKSPACE_ROOT / "manage-agent-memory").exists(), "required_for_answers": False},
-        "backend/researchos/brain": {"path": str(WORKSPACE_ROOT.parent.parent / "backend" / "researchos" / "brain"), "exists": (WORKSPACE_ROOT.parent.parent / "backend" / "researchos" / "brain").exists(), "required_for_answers": False},
+        "backend/researchos/brain": {"path": str(REPO_ROOT / "backend" / "researchos" / "brain"), "exists": (REPO_ROOT / "backend" / "researchos" / "brain").exists(), "required_for_answers": False},
     }
 
 

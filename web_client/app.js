@@ -39,16 +39,16 @@ function updatePill(id, label, tone) {
 function updateShellStatus() {
   const connected = Boolean(appState.health?.ok);
   backendDot.classList.toggle("ok", connected);
-  backendText.textContent = connected ? "Connected" : "Backend unavailable";
+  backendText.textContent = connected ? "已连接" : "后端不可用";
 
   const resolverDisabled = appState.resolverHealth?.error === "dual_agent_api_disabled";
   const resolverOk = Boolean(appState.resolverHealth?.ok);
   updatePill(
     "dualAgentPill",
-    resolverDisabled ? "Dual Agent disabled" : resolverOk ? "Dual Agent ready" : "Dual Agent unavailable",
+    resolverDisabled ? "双 Agent 已关闭" : resolverOk ? "双 Agent 就绪" : "双 Agent 不可用",
     resolverDisabled ? "muted" : resolverOk ? "success" : "warning",
   );
-  updatePill("runtimePill", connected ? "Runtime online" : "Runtime offline", connected ? "success" : "danger");
+  updatePill("runtimePill", connected ? "运行时在线" : "运行时离线", connected ? "success" : "danger");
 }
 
 async function refreshProjects() {
@@ -61,7 +61,6 @@ async function refreshProjects() {
 async function refreshShell() {
   const [health, runtime, resolver] = await Promise.all([getHealth(), getRuntimeStatus(appState.activeProjectId), getResolverHealth()]);
   setHealth(health.ok ? { ok: true, ...health.data } : { ok: false, error: health.error });
-  appState.dualAgentEnabled = resolver.ok;
   appState.runtimeStatus = runtime.ok ? runtime.data : null;
   setResolverHealth(resolver.ok ? { ok: true, ...resolver.data } : { ok: false, error: resolver.error, status: resolver.status });
   updateShellStatus();

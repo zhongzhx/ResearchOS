@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from runtime_paths import core_runtime_memory_root
+
 
 CORE_SKILL_FOLDERS = [
     "analyze-experiment-results",
@@ -435,7 +437,7 @@ def stable_id(*parts: Any, length: int = 24) -> str:
 
 
 def workspace_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return core_runtime_memory_root()
 
 
 def skill_library_roots() -> list[Path]:

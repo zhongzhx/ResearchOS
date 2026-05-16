@@ -35,5 +35,5 @@ Use when task_type is `research_planning` and the user has approved this generat
 - Human review is required before activation.
 
 # Provenance
-- created_from_skillrun_id: 6c73f4d40eb64b41975cbc4a
+- created_from_skillrun_id: 98d1b5763c51edea9a084026
 - risk_level: medium

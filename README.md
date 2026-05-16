@@ -99,7 +99,7 @@ Run broader backend tests:
 
 ```powershell
 py -m unittest discover -s tests -p "test_*.py"
-$env:LLM_PROVIDER='mock'; py -m unittest discover -s skills\researchos_skill_library\01_core_runtime_memory\research-agent-runtime\scripts\tests -p "test_research_os_mvp.py"
+$env:LLM_PROVIDER='mock'; py -m unittest discover -s backend\research_agent_runtime\scripts\tests -p "test_research_os_mvp.py"
 ```
 
 ## Local Data

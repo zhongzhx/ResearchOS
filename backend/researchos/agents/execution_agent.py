@@ -151,6 +151,14 @@ class ResearchExecutionAgent:
     def collect_outputs(self, task_id: str) -> dict[str, Any]:
         return collect_task_outputs(task_id)
 
+    def call_llm(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        from backend.researchos.llm.gateway import call_llm
+        from backend.researchos.prompts.mvp_prompt_adapter import load_mvp_system_prompt
+
+        system = load_mvp_system_prompt()
+        scoped_messages = [{"role": "system", "content": system}, *messages]
+        return call_llm("execution_agent", scoped_messages, **kwargs)
+
     def write_skillrun_record(self, task_spec: TaskSpec, outputs: dict[str, Any], logs: list[str], status: str, result: ExecutionResult | None = None) -> str:
         ros = import_research_os_mvp()
         existing = str((outputs or {}).get("skill_run_id") or "")

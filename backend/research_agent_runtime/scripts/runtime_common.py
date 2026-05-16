@@ -12,13 +12,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from runtime_paths import core_runtime_memory_root, skill_library_root
+
 
 def now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
 def workspace_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return core_runtime_memory_root()
 
 
 def slug(value: str) -> str:
@@ -32,10 +34,12 @@ def stable_id(*parts: str) -> str:
 
 
 def script_path(skill: str, script_name: str) -> Path:
-    path = workspace_root() / skill / "scripts" / script_name
-    if not path.exists():
-        raise FileNotFoundError(f"Required script not found: {path}")
-    return path
+    candidates = [workspace_root() / skill / "scripts" / script_name]
+    candidates.extend(sorted(skill_library_root().glob(f"*/{skill}/scripts/{script_name}")))
+    for path in candidates:
+        if path.exists():
+            return path
+    raise FileNotFoundError(f"Required script not found: {candidates[0]}")
 
 
 def state_db(agent_root: Path) -> Path:

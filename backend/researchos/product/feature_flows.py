@@ -37,7 +37,7 @@ FEATURES: dict[str, ProductFeatureContract] = {
         required_skills=["skill-router-orchestrator", "context-compiler-maintenance", "design-experiment-matrix", "skill-output-validator", "evidence-promotion"],
         expected_artifacts=["task_spec", "skillrun", "validation_report", "handoff", "memory_update"],
         expected_frontend_panels=["Chat", "Task Lifecycle", "Runs", "Research Brain"],
-        status="ready",
+        status="partial",
         fallback_behavior="Use local demo flow when no API key or external tools are configured.",
         safety_requirements=["Execution Agent receives minimal context only.", "Brain Agent owns long-term Research Brain writes.", "Generated pending skills stay pending_review."],
     ),
@@ -95,7 +95,7 @@ FEATURES: dict[str, ProductFeatureContract] = {
         required_skills=["design-experiment-matrix"],
         expected_artifacts=["experiment_matrix", "controls", "readouts", "decision_summary"],
         expected_frontend_panels=["Chat", "Task Lifecycle", "Research Brain"],
-        status="ready",
+        status="partial",
         fallback_behavior="Use local demo experiment design when LLM or script execution is unavailable.",
         safety_requirements=["Do not provide over-specific hazardous wet-lab operations.", "Add safety/ethics notes for animal, human, clinical, or pathogen work."],
     ),
@@ -181,7 +181,8 @@ def run_product_feature(feature_id: str, payload: dict[str, Any] | None = None) 
     if feature_id == "experiment_design_workflow":
         result = raw2647_design_payload(project_id)
         result["feature_id"] = feature_id
-        result["status"] = "ready"
+        result["status"] = "partial"
+        result.setdefault("warnings", []).append("demo_flow_dry_run")
         _persist_demo_visibility(project_id, result)
         return result
     if feature_id == "literature_harvest_workflow":
@@ -210,7 +211,8 @@ def _run_dual_agent(payload: dict[str, Any], project_id: str, status: FeatureSta
     user_query = str(payload.get("user_query") or payload.get("query") or "")
     if mode in {"demo", "dry_run"} or not user_query:
         result = raw2647_design_payload(project_id)
-        result["status"] = "ready"
+        result["status"] = "partial"
+        result.setdefault("warnings", []).append("demo_flow_dry_run")
         _persist_demo_visibility(project_id, result)
         return result
     try:
@@ -238,7 +240,7 @@ def _normalize_coordinator_product_response(response: dict[str, Any], project_id
     return product_response(
         ok=bool(response.get("ok", execution.get("status") in {"success", "partial_success"})),
         feature_id="dual_agent_research_task",
-        status="ready" if response.get("ok") else "partial",
+        status="partial",
         result={"coordinator": response},
         task_lifecycle={
             "Goal": response.get("research_task", {}).get("goal") or task_spec.get("user_query") or "",
@@ -311,7 +313,7 @@ def _run_data_analysis(payload: dict[str, Any], project_id: str, status: Feature
     return product_response(
         ok=True,
         feature_id="data_analysis_workflow",
-        status="partial" if status == "partial" else "ready",
+        status="partial",
         result={"rows": len(rows), "columns": columns, "numeric_columns": numeric_columns, "group_columns": group_columns, "missing_values": missing_values, "group_summary": group_summary},
         task_lifecycle={"Goal": "Analyze scientific data", "Plan": ["Parse CSV", "Detect groups/numeric columns", "Draft cautious narrative"], "Contract": {"no_significance_without_p_value": True}, "Execution": {"status": "success"}, "Artifacts": artifacts, "Validation": validation, "Handoff": "Add raw replicates and statistical test before claiming significance.", "Memory": {"status": "not_promoted_without_statistics"}},
         artifacts=artifacts,

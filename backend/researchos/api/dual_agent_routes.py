@@ -10,11 +10,9 @@ except Exception:  # pragma: no cover - FastAPI may not be installed in tests.
 from backend.researchos.agents.brain_agent import ResearchBrainAgent
 from backend.researchos.agents.coordinator import AgentCoordinator
 from backend.researchos.agents.execution_agent import ResearchExecutionAgent
-from backend.researchos.brain.skill_registry_review import activate_skill, list_pending_skills, reject_skill
 from backend.researchos.demo.dual_agent_demo import run_demo_pdf_evidence_flow
-from backend.researchos.execution.runtime_adapter import default_agent_root
-from backend.researchos.skills.pipeline_registry import load_skill_catalog, list_pipelines, route_query_to_pipeline
-from backend.researchos.skills.resolver_checker import run_resolver_smoke_tests
+from backend.researchos.execution.runtime_adapter import default_agent_root, import_research_os_mvp
+from backend.researchos.integration import mvp_skill_bridge
 from backend.researchos.memory.compression.cognitive_state import load_cognitive_state, refresh_cognitive_state_after_task
 from backend.researchos.memory.episodic.episodic_memory_store import list_recent_episodes
 from backend.researchos.memory.events.event_store import list_events
@@ -38,7 +36,128 @@ def coordinator_for_request() -> AgentCoordinator:
 
 
 def coordinator_run(payload: dict[str, Any]) -> dict[str, Any]:
+    if _should_delegate_to_mvp_chat(payload):
+        return _mvp_chat_fallback(payload)
     return coordinator_for_request().run_full_cycle(str(payload.get("user_query") or ""), project_id=payload.get("project_id"))
+
+
+def _coordinator_message(payload: dict[str, Any]) -> str:
+    return str(payload.get("message") or payload.get("user_query") or payload.get("query") or payload.get("content") or "").strip()
+
+
+def _should_delegate_to_mvp_chat(payload: dict[str, Any]) -> bool:
+    text = _coordinator_message(payload)
+    if not text:
+        return True
+    lower = text.casefold()
+    ordinary_chinese = [
+        "你好",
+        "您好",
+        "你是什么",
+        "你可以为我做什么",
+        "你能为我做什么",
+        "你能做什么",
+        "你有什么功能",
+        "有什么功能",
+        "怎么使用你",
+        "介绍一下当前项目",
+        "介绍当前项目",
+        "当前项目是什么",
+        "记忆机制",
+        "记忆系统",
+    ]
+    if any(term in text for term in ordinary_chinese):
+        return True
+    task_markers = [
+        "search papers",
+        "collect literature",
+        "download papers",
+        "analyze data",
+        "build sop",
+        "design experiment",
+        "diagnose failure",
+        "weekly report",
+        "write report",
+        "pipeline",
+        "skill",
+        "task lifecycle",
+        "搜索文献",
+        "采集文献",
+        "下载文献",
+        "分析数据",
+        "生成 sop",
+        "实验设计",
+        "失败复盘",
+        "周报",
+        "任务生命周期",
+    ]
+    if any(marker in lower for marker in task_markers):
+        return False
+    chat_markers = [
+        "hi",
+        "hello",
+        "what model",
+        "what can you do",
+        "who are you",
+        "can you answer",
+        "memory mechanism",
+        "memory system",
+        "conversation history",
+        "first message",
+        "first thing i said",
+        "what can you do",
+        "what do you do",
+        "your capabilities",
+        "your features",
+        "capability",
+        "你好",
+        "您好",
+        "在吗",
+        "你是什么",
+        "什么大模型",
+        "你能为我做什么",
+        "你有什么记忆",
+        "记忆机制",
+        "记忆系统",
+        "对话记录",
+        "聊天记录",
+        "第一句话",
+        "第一句",
+        "刚才说了什么",
+        "我说过什么",
+        "你有什么功能",
+        "有什么功能",
+        "你能做什么",
+        "你能为我做什么",
+        "功能",
+        "能力",
+        "能正常回答",
+        "介绍一下当前项目",
+        "当前项目",
+    ]
+    return any(marker in lower for marker in chat_markers)
+
+
+def _mvp_chat_fallback(payload: dict[str, Any]) -> dict[str, Any]:
+    message = _coordinator_message(payload)
+    chat_payload = dict(payload)
+    chat_payload["message"] = message
+    chat_payload.setdefault("user_query", message)
+    legacy = import_research_os_mvp().agent_chat(default_agent_root(), chat_payload)
+    response = dict(legacy if isinstance(legacy, dict) else {"ok": True, "answer": str(legacy)})
+    response["ok"] = bool(response.get("ok", True))
+    response["mode"] = "mvp_chat_fallback"
+    response["fallback_reason"] = "ordinary_chat_uses_mvp_runtime"
+    response.setdefault("answer_source", "fallback")
+    response.setdefault("llm_called", False)
+    response.setdefault("llm_output_used", False)
+    response.setdefault("answer_overwritten_after_llm", False)
+    response.setdefault("llm_provider", "")
+    response.setdefault("llm_model", "")
+    response.setdefault("prompt_router_used", False)
+    response.setdefault("context_compiler_used", False)
+    response.setdefault("template_id", None)
+    return response
 
 
 def process_skillrun(skillrun_id: str) -> dict[str, Any]:
@@ -46,35 +165,31 @@ def process_skillrun(skillrun_id: str) -> dict[str, Any]:
 
 
 def pending_skills() -> list[dict[str, Any]]:
-    return list_pending_skills()
+    return mvp_skill_bridge.pending_skills()
 
 
 def activate_generated_skill(skill_name: str) -> dict[str, Any]:
-    return activate_skill(skill_name)
+    return mvp_skill_bridge.activate_pending_skill(skill_name)
 
 
 def reject_generated_skill(skill_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return reject_skill(skill_name, str(payload.get("reason") or "rejected by reviewer"))
+    return mvp_skill_bridge.reject_pending_skill(skill_name, str(payload.get("reason") or "rejected by reviewer"))
 
 
 def resolver_check() -> dict[str, Any]:
-    return run_resolver_smoke_tests()
+    return mvp_skill_bridge.resolver_check()
 
 
 def skill_catalog() -> dict[str, Any]:
-    skills = list(load_skill_catalog().values())
-    return {"ok": True, "count": len(skills), "skills": skills}
+    return mvp_skill_bridge.get_skill_catalog()
 
 
 def pipeline_registry() -> dict[str, Any]:
-    pipelines = list_pipelines()
-    return {"ok": True, "count": len(pipelines), "pipelines": pipelines}
+    return mvp_skill_bridge.get_pipeline_registry()
 
 
 def route_skill_query(payload: dict[str, Any]) -> dict[str, Any]:
-    query = str(payload.get("user_query") or payload.get("query") or payload.get("message") or "")
-    pipeline = route_query_to_pipeline(query)
-    return {"ok": True, "query": query, "pipeline": pipeline}
+    return mvp_skill_bridge.route_skill_query(payload)
 
 
 def memory_working(payload: dict[str, Any]) -> dict[str, Any]:

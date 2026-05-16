@@ -6,7 +6,7 @@ import { emptyState } from "../components/empty_state.js";
 import { jsonDetails, jsonViewer } from "../components/json_viewer.js";
 
 function pipelineName(run) {
-  return run?.task_spec?.input_data?.pipeline_name || run?.task_spec?.intent || run?.task_spec?.task_type || "Not available yet";
+  return run?.task_spec?.input_data?.pipeline_name || run?.task_spec?.intent || run?.task_spec?.task_type || "暂无数据";
 }
 
 function lifecycleSections(run) {
@@ -18,20 +18,20 @@ function lifecycleSections(run) {
   const artifacts = execution.artifacts || execution.output_files || run?.artifacts || [];
   const contract = run?.research_task?.contract || run?.contract || {};
   return [
-    ["Goal", fieldList([["User query", taskSpec.user_query || run?.user_query], ["Intent", taskSpec.intent], ["Success criteria", taskSpec.success_criteria]])],
-    ["Plan", fieldList([["Selected pipeline", pipelineName(run)], ["Stages", asArray(taskSpec.stages).join(", ")], ["Required skills", asArray(taskSpec.required_skills).join(", ")]])],
-    ["Contract", jsonViewer(contract.allowed_tools || contract.forbidden_tools || contract.expected_outputs ? contract : {
+    ["目标", fieldList([["用户问题", taskSpec.user_query || run?.user_query], ["意图", taskSpec.intent], ["成功标准", taskSpec.success_criteria]])],
+    ["计划", fieldList([["选择流程", pipelineName(run)], ["阶段", asArray(taskSpec.stages).join(", ")], ["所需技能", asArray(taskSpec.required_skills).join(", ")]])],
+    ["契约", jsonViewer(contract.allowed_tools || contract.forbidden_tools || contract.expected_outputs ? contract : {
       allowed_tools: taskSpec.allowed_tools || [],
       forbidden_tools: taskSpec.forbidden_tools || [],
       expected_outputs: taskSpec.expected_outputs || [],
       validation_rules: taskSpec.validation_rules || [],
       source_requirements: taskSpec.source_requirements || [],
     })],
-    ["Execution", fieldList([["Status", execution.status], ["SkillRun id", execution.skillrun_id], ["Started", execution.started_at], ["Finished", execution.finished_at], ["Errors", asArray(execution.errors).join("; ") || "None recorded"], ["Unresolved items", asArray(execution.unresolved_items).join("; ")]])],
-    ["Artifacts", artifacts.length ? jsonViewer(artifacts) : "<p>Not available yet</p>"],
-    ["Validation", fieldList([["Safe to return", validation.safe_to_return], ["Safe to promote", validation.safe_to_promote], ["Issues", asArray(validation.issues).join("; ") || "None recorded"]]) + jsonViewer(validation)],
-    ["Handoff", `<p>${escapeHtml(text(handoff))}</p>`],
-    ["Memory", jsonViewer({
+    ["执行", fieldList([["状态", execution.status], ["技能运行 id", execution.skillrun_id], ["开始时间", execution.started_at], ["完成时间", execution.finished_at], ["错误", asArray(execution.errors).join("; ") || "无记录"], ["未解决项", asArray(execution.unresolved_items).join("; ")]])],
+    ["产物", artifacts.length ? jsonViewer(artifacts) : "<p>暂无数据</p>"],
+    ["校验", fieldList([["可返回", validation.safe_to_return], ["可入库", validation.safe_to_promote], ["问题", asArray(validation.issues).join("; ") || "无记录"]]) + jsonViewer(validation)],
+    ["交接", `<p>${escapeHtml(text(handoff))}</p>`],
+    ["记忆", jsonViewer({
       promoted_pages: memory.promoted_pages || run?.memory_pages || [],
       claims: memory.promoted_claims || memory.claims || [],
       datasets: memory.datasets || [],
@@ -44,26 +44,26 @@ function lifecycleSections(run) {
 
 function renderLastRun(run) {
   if (!run) {
-    return emptyState("No lifecycle run yet", "Run a task from Chat to see goal, plan, contract, execution, artifacts, validation, handoff, and memory.");
+    return emptyState("暂无任务流程记录", "从聊天发起研究请求后，这里会显示目标、计划、契约、执行、产物、校验、交接和记忆。");
   }
   return `<div class="panel pad grid">
     <div class="badge-row">
-      ${badge(`Pipeline: ${pipelineName(run)}`, "success")}
-      ${badge(`Status: ${text(run?.execution_result?.status, "unknown")}`)}
-      ${badge(`SkillRun: ${text(run?.execution_result?.skillrun_id, "none")}`)}
+      ${badge(`流程：${pipelineName(run)}`, "success")}
+      ${badge(`状态：${text(run?.execution_result?.status, "未知")}`)}
+      ${badge(`技能运行：${text(run?.execution_result?.skillrun_id, "无")}`)}
     </div>
     ${lifecycleSections(run).map(([title, body], index) => detailsBlock(title, body, index < 2)).join("")}
-    ${jsonDetails("Raw lifecycle source", run)}
+    ${jsonDetails("任务流程原始数据", run)}
   </div>`;
 }
 
 export async function renderTaskLifecycleView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
-      <div><h1 class="page-title">Task Lifecycle</h1><p class="page-subtitle">Each research task is organized as goal, plan, contract, execution, artifacts, validation, handoff, and memory.</p></div>
+      <div><h1 class="page-title">任务流程</h1><p class="page-subtitle">每个研究任务都会整理为目标、计划、契约、执行、产物、校验、交接和记忆。</p></div>
     </header>
     <div class="split-layout">
-      <div class="panel pad"><div id="taskList">${loadingPanel("Loading tasks")}</div></div>
+      <div class="panel pad"><div id="taskList">${loadingPanel("正在加载任务")}</div></div>
       <div class="page-scroll" id="taskDetail">${renderLastRun(appState.lastRunResult)}</div>
     </div>
   </section>`;
@@ -72,11 +72,11 @@ export async function renderTaskLifecycleView({ root }) {
   const tasks = result.ok ? result.data.tasks || result.data.agent_tasks || [] : [];
   const list = root.querySelector("#taskList");
   if (!result.ok) {
-    list.innerHTML = apiErrorCard(result, "Task list is unavailable");
+    list.innerHTML = apiErrorCard(result, "任务列表不可用");
     return;
   }
   if (!tasks.length) {
-    list.innerHTML = emptyState("No tasks yet", "Send a research request from Chat and task records will appear here.");
+    list.innerHTML = emptyState("暂无任务", "从聊天发起研究请求后，任务记录会显示在这里。");
     return;
   }
   list.innerHTML = `<div class="list">${tasks
@@ -84,8 +84,8 @@ export async function renderTaskLifecycleView({ root }) {
     .map((task) =>
       itemCard({
         title: task.title || task.user_query || task.task_type || task.id,
-        subtitle: task.summary || task.current_stage || task.task_id || "Task metadata only",
-        status: task.status || "recorded",
+        subtitle: task.summary || task.current_stage || task.task_id || "仅有任务元数据",
+        status: task.status || "已记录",
         clickable: true,
         data: task.id || task.task_id,
       }),
@@ -95,7 +95,7 @@ export async function renderTaskLifecycleView({ root }) {
     button.addEventListener("click", async () => {
       const detail = await getTask(button.dataset.itemId);
       const task = detail.data?.task || detail.data || {};
-      root.querySelector("#taskDetail").innerHTML = detail.ok ? renderLastRun(task) : apiErrorCard(detail, "Task detail unavailable");
+      root.querySelector("#taskDetail").innerHTML = detail.ok ? renderLastRun(task) : apiErrorCard(detail, "任务详情不可用");
     });
   });
 }

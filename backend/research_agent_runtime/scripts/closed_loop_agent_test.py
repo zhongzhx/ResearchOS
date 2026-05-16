@@ -12,9 +12,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from runtime_paths import repo_root
+
 
 def workspace_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return repo_root()
 
 
 def free_port() -> int:

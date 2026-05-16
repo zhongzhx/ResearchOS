@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from runtime_paths import prompt_root
 
-PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
+PROMPT_ROOT = prompt_root()
 PROMPT_PATH = PROMPT_ROOT / "researchos_agent_system_prompt.md"
 ZH_PROMPT_ROOT = PROMPT_ROOT / "zh"
 

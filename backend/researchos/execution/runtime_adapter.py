@@ -8,7 +8,12 @@ from typing import Any
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    try:
+        from backend.researchos.config.paths import get_repo_root
+
+        return get_repo_root()
+    except Exception:
+        return Path(__file__).resolve().parents[3]
 
 
 def runtime_skill_dir() -> Path:
@@ -16,7 +21,7 @@ def runtime_skill_dir() -> Path:
 
 
 def scripts_dir() -> Path:
-    return runtime_skill_dir() / "scripts"
+    return repo_root() / "backend" / "research_agent_runtime" / "scripts"
 
 
 def import_research_os_mvp() -> Any:
@@ -29,7 +34,11 @@ def import_research_os_mvp() -> Any:
 
 
 def default_agent_root() -> Path:
-    return Path(os.environ.get("RESEARCHOS_AGENT_ROOT") or repo_root() / "agent_data")
+    if os.environ.get("RESEARCHOS_AGENT_ROOT"):
+        return Path(os.environ["RESEARCHOS_AGENT_ROOT"])
+    from backend.researchos.config.paths import get_agent_data_dir
+
+    return get_agent_data_dir()
 
 
 SECRET_REDACTION_PATTERNS = [

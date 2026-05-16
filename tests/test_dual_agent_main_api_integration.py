@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "researchos_skill_library" / "01_core_runtime_memory" / "research-agent-runtime" / "scripts"
+SCRIPTS = ROOT / "backend" / "research_agent_runtime" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -105,7 +105,9 @@ class DualAgentMainApiIntegrationTests(unittest.TestCase):
         self.assertTrue(catalog["ok"])
         self.assertTrue(any(row["skill_id"] == "skill-output-validator" for row in catalog["skills"]))
         self.assertTrue(any(row["pipeline_name"] == "data_analysis_to_narrative" for row in pipelines["pipelines"]))
-        self.assertEqual(routed["pipeline"]["pipeline_name"], "data_analysis_to_narrative")
+        self.assertEqual(routed["source"], "mvp_runtime")
+        self.assertEqual(routed["pipeline"]["source"], "mvp_prompt_router")
+        self.assertEqual(routed["pipeline"]["pipeline_name"], routed["mvp_prompt_routing"]["task_type"])
 
     def test_legacy_agent_chat_route_is_unchanged(self) -> None:
         original_agent_chat = api.research_os.agent_chat

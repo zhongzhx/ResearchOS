@@ -58,6 +58,10 @@ export function setLastRunResult(result) {
   appState.lastRunResult = result;
 }
 
+export function setDualAgentEnabled(enabled) {
+  appState.dualAgentEnabled = Boolean(enabled);
+}
+
 export function setConversationId(conversationId) {
   appState.conversationId = conversationId || "";
 }

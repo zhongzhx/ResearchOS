@@ -36,7 +36,7 @@ py .\scripts\browser_learning_to_kb.py --kb-root "..\research-agent-runtime\agen
 Run it as part of the complete agent loop:
 
 ```powershell
-py ..\research-agent-runtime\scripts\run_research_job.py --project-name "my_project" --query "your topic" --agent-root "..\research-agent-runtime\agent_data" --browser-learning --browser-profile "Default" --browser-headed
+py ..\..\..\..\backend\research_agent_runtime\scripts\run_research_job.py --project-name "my_project" --query "your topic" --agent-root "..\..\..\..\agent_data" --browser-learning --browser-profile "Default" --browser-headed
 ```
 
 ## What It Produces

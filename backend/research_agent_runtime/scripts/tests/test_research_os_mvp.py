@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import research_os_mvp as ros
 import research_memory_canonical as canonical_memory
+from runtime_paths import prompt_root
 
 
 class ResearchOsMvpTests(unittest.TestCase):
@@ -483,7 +484,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
         self.assertGreaterEqual(entry["field_confidence"]["experiment_name"], 0.9)
 
     def test_chinese_prompt_policy_files_cover_required_guardrails(self) -> None:
-        prompt_dir = Path(__file__).resolve().parents[2] / "prompts" / "zh"
+        prompt_dir = prompt_root() / "zh"
         base = prompt_dir / "base_identity_zh.md"
         evidence = (prompt_dir / "evidence_policy_zh.md").read_text(encoding="utf-8")
         citation = (prompt_dir / "citation_policy_zh.md").read_text(encoding="utf-8")

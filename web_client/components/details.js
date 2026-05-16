@@ -1,7 +1,7 @@
 import { escapeHtml } from "./cards.js";
 
 export function detailsBlock(title, body, open = false) {
-  const content = body || "<p>Not available yet</p>";
+  const content = body || "<p>暂无数据</p>";
   return `<details class="details"${open ? " open" : ""}>
     <summary>${escapeHtml(title)}</summary>
     <div class="details-body">${content}</div>
@@ -10,7 +10,7 @@ export function detailsBlock(title, body, open = false) {
 
 export function fieldList(rows) {
   const items = rows
-    .map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value ?? "Not available yet")}</p>`)
+    .map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value ?? "暂无数据")}</p>`)
     .join("");
-  return items || "<p>Not available yet</p>";
+  return items || "<p>暂无数据</p>";
 }
