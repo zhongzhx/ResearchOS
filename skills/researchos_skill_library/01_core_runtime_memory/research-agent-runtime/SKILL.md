@@ -23,19 +23,19 @@ Use this skill as the top-level agent runtime. It connects the lower-level skill
 Run one complete job:
 
 ```powershell
-py .\scripts\run_research_job.py --project-name "my_project" --query "machine learning cancer diagnosis" --max-results 20 --agent-root ".\agent_data"
+py ..\..\..\..\backend\research_agent_runtime\scripts\run_research_job.py --project-name "my_project" --query "machine learning cancer diagnosis" --max-results 20 --agent-root ".\agent_data"
 ```
 
 Enable browser learning as a first-class research mode:
 
 ```powershell
-py .\scripts\run_research_job.py --project-name "my_project" --query "your topic" --max-results 20 --agent-root ".\agent_data" --browser-learning --browser-profile "Default" --browser-headed
+py ..\..\..\..\backend\research_agent_runtime\scripts\run_research_job.py --project-name "my_project" --query "your topic" --max-results 20 --agent-root ".\agent_data" --browser-learning --browser-profile "Default" --browser-headed
 ```
 
 Enable browser-use fallback when normal API/current-network download fails:
 
 ```powershell
-py .\scripts\run_research_job.py --project-name "my_project" --query "your topic" --max-results 20 --agent-root ".\agent_data" --browser-fallback
+py ..\..\..\..\backend\research_agent_runtime\scripts\run_research_job.py --project-name "my_project" --query "your topic" --max-results 20 --agent-root ".\agent_data" --browser-fallback
 ```
 
 Browser learning and browser fallback require the `browser-use` CLI to be installed on PATH. The repository may be present locally, but browser control remains unavailable until the CLI is installed.
@@ -43,7 +43,7 @@ Browser learning and browser fallback require the `browser-use` CLI to be instal
 Start the local API server:
 
 ```powershell
-py .\scripts\research_agent_api.py --host 127.0.0.1 --port 8765 --agent-root ".\agent_data"
+py ..\..\..\..\backend\research_agent_runtime\scripts\research_agent_api.py --host 127.0.0.1 --port 8765 --agent-root ".\agent_data"
 ```
 
 Every completed or failed job is recorded into centralized memory. By default this is:
@@ -55,19 +55,19 @@ Every completed or failed job is recorded into centralized memory. By default th
 Override it when needed:
 
 ```powershell
-py .\scripts\run_research_job.py --project-name "my_project" --query "your topic" --agent-root ".\agent_data" --memory-root ".\agent_memory"
+py ..\..\..\..\backend\research_agent_runtime\scripts\run_research_job.py --project-name "my_project" --query "your topic" --agent-root ".\agent_data" --memory-root ".\agent_memory"
 ```
 
 Ask the knowledge base:
 
 ```powershell
-py .\scripts\answer_kb.py --kb-root ".\agent_data\kbs\my_project" --question "What methods are used?"
+py ..\..\..\..\backend\research_agent_runtime\scripts\answer_kb.py --kb-root ".\agent_data\kbs\my_project" --question "What methods are used?"
 ```
 
 Record feedback:
 
 ```powershell
-py .\scripts\record_feedback.py --agent-root ".\agent_data" --project-name "my_project" --doi "10.xxxx/example" --relevance relevant --notes "Useful methods section"
+py ..\..\..\..\backend\research_agent_runtime\scripts\record_feedback.py --agent-root ".\agent_data" --project-name "my_project" --doi "10.xxxx/example" --relevance relevant --notes "Useful methods section"
 ```
 
 ## API Endpoints

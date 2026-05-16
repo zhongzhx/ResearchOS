@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Any
 
 from backend.researchos.agents.agent_protocol import TaskSpec
+from backend.researchos.execution.runtime_adapter import check_pipeline_authorization, redact_payload
+from backend.researchos.skills.pipeline_registry import get_pipeline_for_intent
 
 from .skill_dispatcher import call_skill, validate_required_skills
-from .tool_dispatcher import call_tool
+from .tool_dispatcher import call_tool, validate_allowed_tool
 
 
 SUPPORTED_TASK_TYPES = {
@@ -47,18 +49,48 @@ def create_task_workspace(task_id: str, base_dir: str | Path | None = None) -> s
 def build_execution_plan(task_spec: TaskSpec) -> dict[str, Any]:
     if task_spec.task_type not in SUPPORTED_TASK_TYPES:
         return {"status": "failed", "error": f"unknown task_type: {task_spec.task_type}", "steps": [], "skills": [], "tools": []}
+    pipeline_key = str(task_spec.input_data.get("pipeline_name") or task_spec.intent or task_spec.task_type)
+    authorization = check_pipeline_authorization(task_spec, get_pipeline_for_intent(pipeline_key))
+    if not authorization["valid"]:
+        return {"status": "failed", "error": "; ".join(authorization["errors"]), "steps": [], "skills": [], "tools": [], "authorization": authorization}
     defaults = SUPPORTED_TASK_TYPES[task_spec.task_type]
     skills = list(task_spec.required_skills or defaults.get("skills") or [])
-    tools = [tool for tool in list(task_spec.allowed_tools or defaults.get("tools") or []) if tool not in set(task_spec.forbidden_tools or [])]
+    default_tools = list(defaults.get("tools") or [])
+    if default_tools and not task_spec.allowed_tools:
+        return {
+            "status": "failed",
+            "error": f"task_type {task_spec.task_type} requires explicit allowed_tools: {', '.join(default_tools)}",
+            "steps": [],
+            "skills": skills,
+            "tools": [],
+        }
+    tools = list(task_spec.allowed_tools or [])
+    tool_errors: list[str] = []
+    for tool in tools:
+        validation = validate_allowed_tool(tool, task_spec)
+        if not validation["valid"]:
+            tool_errors.extend(validation["errors"])
+    if tool_errors:
+        return {"status": "failed", "error": "; ".join(tool_errors), "steps": [], "skills": skills, "tools": tools}
     steps = []
     steps.extend({"type": "skill", "name": skill} for skill in skills)
     steps.extend({"type": "tool", "name": tool} for tool in tools)
-    return {"status": "ready", "task_type": task_spec.task_type, "steps": steps, "skills": skills, "tools": tools}
+    return {"status": "ready", "task_type": task_spec.task_type, "steps": steps, "skills": skills, "tools": tools, "authorization": authorization}
 
 
 def run_execution_plan(plan: dict[str, Any], task_spec: TaskSpec, agent_root: Path | None = None) -> dict[str, Any]:
     if plan.get("status") != "ready":
         return {"ok": False, "error": plan.get("error") or "execution plan is not ready", "logs": [], "outputs": {}, "output_files": [], "sources": []}
+    authorization = plan.get("authorization") or check_pipeline_authorization(task_spec, get_pipeline_for_intent(str(task_spec.input_data.get("pipeline_name") or task_spec.intent or task_spec.task_type)))
+    if not authorization["valid"]:
+        return {
+            "ok": False,
+            "error": "; ".join(authorization["errors"]),
+            "logs": ["authorization pre-dispatch rejected"],
+            "outputs": {"authorization": authorization},
+            "output_files": [],
+            "sources": [],
+        }
     workspace = create_task_workspace(task_spec.task_id, task_spec.input_data.get("workspace_base_dir"))
     task_spec.input_data.setdefault("workspace_dir", workspace)
     logs: list[str] = [f"workspace:{workspace}"]
@@ -78,18 +110,18 @@ def run_execution_plan(plan: dict[str, Any], task_spec: TaskSpec, agent_root: Pa
         if step.get("type") == "skill":
             result = call_skill(step["name"], {**task_spec.input_data, "context_package": task_spec.context_package}, task_spec, agent_root=agent_root)
             outputs["skill_results"].append(result)
-            logs.extend(result.get("logs", []))
-            errors.extend(result.get("errors", []))
+            logs.extend(redact_payload(result.get("logs", [])))
+            errors.extend(redact_payload(result.get("errors", [])))
             if result.get("skill_run_id"):
                 outputs["skill_run_id"] = result.get("skill_run_id")
             if isinstance(result.get("output_refs"), list):
                 sources.extend(result.get("output_refs"))
         elif step.get("type") == "tool":
             result = call_tool(step["name"], task_spec.input_data, task_spec)
-            outputs["tool_results"].append(result)
-            logs.extend(result.get("logs", []))
+            outputs["tool_results"].append(redact_payload(result))
+            logs.extend(redact_payload(result.get("logs", [])))
             if result.get("error"):
-                errors.append(result["error"])
+                errors.append(str(redact_payload(result["error"])))
             output_files.extend(result.get("output_files") or [])
             if isinstance(result.get("sources"), list):
                 sources.extend(result.get("sources") or [])

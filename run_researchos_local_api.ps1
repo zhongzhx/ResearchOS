@@ -1,9 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $workspaceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$legacyApiScript = Join-Path $workspaceRoot "research-agent-runtime\scripts\research_agent_api.py"
-$canonicalApiScript = Join-Path $workspaceRoot "skills\researchos_skill_library\01_core_runtime_memory\research-agent-runtime\scripts\research_agent_api.py"
-$apiScript = if (Test-Path $legacyApiScript) { $legacyApiScript } else { $canonicalApiScript }
+$apiScript = Join-Path $workspaceRoot "backend\research_agent_runtime\scripts\research_agent_api.py"
 $auraRuntime = Join-Path $workspaceRoot "runtime\AURA Research.exe"
 $envFile = Join-Path $workspaceRoot ".env"
 $defaultAgentRoot = Join-Path $workspaceRoot "agent_data"

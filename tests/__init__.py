@@ -5,10 +5,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_RUNTIME_SCRIPTS = (
     ROOT
-    / "skills"
-    / "researchos_skill_library"
-    / "01_core_runtime_memory"
-    / "research-agent-runtime"
+    / "backend"
+    / "research_agent_runtime"
     / "scripts"
 )
 

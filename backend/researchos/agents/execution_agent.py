@@ -10,6 +10,7 @@ from backend.researchos.execution.runtime_adapter import default_agent_root, imp
 from backend.researchos.execution.skill_dispatcher import validate_required_skills
 from backend.researchos.execution.task_runner import build_execution_plan, collect_task_outputs, run_execution_plan
 from backend.researchos.execution.tool_dispatcher import validate_allowed_tool
+from backend.researchos.skills.runtime_skill_loader import build_execution_skill_context, load_selected_skill_docs
 
 
 class ResearchExecutionAgent:
@@ -69,6 +70,31 @@ class ResearchExecutionAgent:
                 finished_at=datetime.now(timezone.utc),
             )
 
+        loader_logs: list[str] = []
+        if task_spec.required_skills:
+            try:
+                selected_docs = load_selected_skill_docs(task_spec.required_skills)
+                selected_context = build_execution_skill_context(task_spec.required_skills, max_tokens=min(6000, max(task_spec.max_context_tokens, 1000)))
+                if selected_context:
+                    existing = task_spec.context_package.get("active_skill_instructions")
+                    active_skill_instructions = existing if isinstance(existing, list) else []
+                    task_spec.context_package["active_skill_instructions"] = [*active_skill_instructions, selected_context]
+                task_spec.input_data["loaded_skill_docs"] = sorted(selected_docs)
+                loader_logs.append(f"loaded selected skill docs: {', '.join(sorted(selected_docs))}")
+            except PermissionError as exc:
+                return ExecutionResult(
+                    task_id=task_spec.task_id,
+                    status="failed",
+                    summary="Execution blocked because one or more selected skills are inactive or unauthorized.",
+                    logs=["runtime skill loader failed"],
+                    errors=[str(exc)],
+                    validation_report={"valid": False, "errors": [str(exc)], "context_isolation": isolation},
+                    started_at=started_at,
+                    finished_at=datetime.now(timezone.utc),
+                )
+            except (KeyError, FileNotFoundError, ValueError) as exc:
+                loader_logs.append(f"selected skill docs unavailable: {exc}")
+
         plan = self.select_execution_plan(task_spec)
         if plan.get("status") != "ready":
             result = ExecutionResult(
@@ -99,7 +125,7 @@ class ResearchExecutionAgent:
             output_files=output_files,
             structured_outputs={**outputs, "execution_plan": plan},
             sources=run_output.get("sources") or task_spec.context_package.get("relevant_sources", []),
-            logs=["context isolation passed", *logs],
+            logs=["context isolation passed", *loader_logs, *logs],
             errors=errors,
             started_at=started_at,
             finished_at=datetime.now(timezone.utc),
@@ -124,6 +150,14 @@ class ResearchExecutionAgent:
 
     def collect_outputs(self, task_id: str) -> dict[str, Any]:
         return collect_task_outputs(task_id)
+
+    def call_llm(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        from backend.researchos.llm.gateway import call_llm
+        from backend.researchos.prompts.mvp_prompt_adapter import load_mvp_system_prompt
+
+        system = load_mvp_system_prompt()
+        scoped_messages = [{"role": "system", "content": system}, *messages]
+        return call_llm("execution_agent", scoped_messages, **kwargs)
 
     def write_skillrun_record(self, task_spec: TaskSpec, outputs: dict[str, Any], logs: list[str], status: str, result: ExecutionResult | None = None) -> str:
         ros = import_research_os_mvp()

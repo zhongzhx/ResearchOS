@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "research-agent-runtime" / "scripts"
+SCRIPTS = ROOT / "backend" / "research_agent_runtime" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -69,12 +69,14 @@ class DualAgentMainApiIntegrationTests(unittest.TestCase):
         os.environ.pop("RESEARCHOS_DUAL_AGENT_API_ENABLED", None)
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self._get_json("/api/demo/dual-agent")
-        self.assertEqual(ctx.exception.code, 404)
+        self.assertEqual(ctx.exception.code, 503)
+        self.assertEqual(json.loads(ctx.exception.read().decode("utf-8"))["error"], "dual_agent_api_disabled")
         ctx.exception.close()
 
         with self.assertRaises(urllib.error.HTTPError) as post_ctx:
             self._post_json("/api/agents/coordinator/run", {"project_id": "p1", "user_query": "write report"})
-        self.assertEqual(post_ctx.exception.code, 404)
+        self.assertEqual(post_ctx.exception.code, 503)
+        self.assertEqual(json.loads(post_ctx.exception.read().decode("utf-8"))["error"], "dual_agent_api_disabled")
         post_ctx.exception.close()
 
     def test_runtime_status_endpoint_reports_demo_runtime_boundary(self) -> None:
@@ -103,7 +105,9 @@ class DualAgentMainApiIntegrationTests(unittest.TestCase):
         self.assertTrue(catalog["ok"])
         self.assertTrue(any(row["skill_id"] == "skill-output-validator" for row in catalog["skills"]))
         self.assertTrue(any(row["pipeline_name"] == "data_analysis_to_narrative" for row in pipelines["pipelines"]))
-        self.assertEqual(routed["pipeline"]["pipeline_name"], "data_analysis_to_narrative")
+        self.assertEqual(routed["source"], "mvp_runtime")
+        self.assertEqual(routed["pipeline"]["source"], "mvp_prompt_router")
+        self.assertEqual(routed["pipeline"]["pipeline_name"], routed["mvp_prompt_routing"]["task_type"])
 
     def test_legacy_agent_chat_route_is_unchanged(self) -> None:
         original_agent_chat = api.research_os.agent_chat

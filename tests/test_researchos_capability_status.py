@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "research-agent-runtime" / "scripts"
+SCRIPTS = ROOT / "backend" / "research_agent_runtime" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -34,6 +34,7 @@ class ResearchOSCapabilityStatusTests(unittest.TestCase):
             "literature_harvest",
             "kb_rag",
             "project_memory",
+            "memory_source_of_truth",
             "execution_memory",
             "artifact_store",
             "response_formatter",

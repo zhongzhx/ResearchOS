@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AURA Research 本地工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="top-bar">
+        <button class="brand-lockup" type="button" data-view-target="chat" aria-label="打开聊天">
+          <span class="brand-mark">A</span>
+          <span class="brand-copy">
+            <strong>AURA Research</strong>
+            <small>面向湿实验科研的 AI 工作台</small>
+          </span>
+        </button>
+        <div id="projectSwitcher" class="project-switcher"></div>
+        <div class="top-status">
+          <span id="dualAgentPill" class="status-pill muted">双 Agent</span>
+          <span id="runtimePill" class="status-pill muted">运行时</span>
+          <button class="button ghost small" type="button" data-view-target="settings">设置</button>
+        </div>
+      </header>
+
+      <div class="workspace-shell">
+        <aside class="sidebar" aria-label="主导航">
+          <nav class="nav-list">
+            <button class="nav-item is-active" type="button" data-view-target="chat">聊天</button>
+            <button class="nav-item" type="button" data-view-target="task_lifecycle">任务流程</button>
+            <button class="nav-item" type="button" data-view-target="brain">研究大脑</button>
+            <button class="nav-item" type="button" data-view-target="library">文献库</button>
+            <button class="nav-item" type="button" data-view-target="skills">技能</button>
+            <button class="nav-item" type="button" data-view-target="runs">运行记录</button>
+            <button class="nav-item" type="button" data-view-target="settings">设置</button>
+          </nav>
+          <div class="sidebar-note">
+            <span class="status-dot" id="backendDot"></span>
+            <span id="backendText">连接中</span>
+          </div>
+        </aside>
+
+        <main id="viewRoot" class="view-root" tabindex="-1"></main>
+      </div>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "created_at": "2026-05-15T02:46:08",
+  "created_from_skillrun_id": "98d1b5763c51edea9a084026",
+  "inputs": [
+    "project_id",
+    "task_input"
+  ],
+  "name": "Generated Research Planning",
+  "outputs": [
+    "structured_outputs",
+    "sources",
+    "artifacts"
+  ],
+  "requires_human_review": true,
+  "status": "pending_review",
+  "type": "research_planning",
+  "validation_policy": {
+    "allow_unsourced_claims": false,
+    "mark_low_confidence": true,
+    "require_sources": true
+  },
+  "version": "0.1.0"
+}

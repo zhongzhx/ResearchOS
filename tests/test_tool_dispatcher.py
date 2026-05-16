@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "research-agent-runtime" / "scripts"
+SCRIPTS = ROOT / "backend" / "research_agent_runtime" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -34,9 +34,11 @@ class ToolDispatcherTests(unittest.TestCase):
 
     def test_script_runner_records_stdout_stderr_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "hello.py"
+            script.write_text("print('hello')", encoding="utf-8")
             spec = TaskSpec(user_query="script", intent="start_skill_request", task_type="generic_skill_task", allowed_tools=["script_runner"], input_data={"workspace_base_dir": tmp})
 
-            result = call_tool("script_runner", {"command": [sys.executable, "-c", "print('hello')"]}, spec)
+            result = call_tool("script_runner", {"command": [sys.executable, str(script)]}, spec)
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["exit_code"], 0)

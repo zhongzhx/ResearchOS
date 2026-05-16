@@ -3,7 +3,7 @@
 Start server:
 
 ```powershell
-py .\scripts\research_agent_api.py --host 127.0.0.1 --port 8765 --agent-root ".\agent_data"
+py ..\..\..\..\backend\research_agent_runtime\scripts\research_agent_api.py --host 127.0.0.1 --port 8765 --agent-root ".\agent_data"
 ```
 
 ## Create Project
