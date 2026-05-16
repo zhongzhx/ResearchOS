@@ -138,3 +138,7 @@ def check_llm_connection(agent_name: str) -> dict[str, Any]:
         return {"ok": False, "status": "not_connected", "agent_name": agent_name, "provider": config.get("provider") or "", "model": config.get("model") or "", "error": "LLM base_url is not configured for live test."}
     result = call_llm(agent_name, [{"role": "user", "content": "connection_ok"}], timeout=10)
     return redact_secrets_in_obj({key: value for key, value in result.items() if key != "message"})
+
+
+test_llm_connection = check_llm_connection
+test_llm_connection.__test__ = False

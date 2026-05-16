@@ -39,15 +39,17 @@ def render_chat_answer(payload: str) -> str:
 
 
 class ChatRealContractTests(unittest.TestCase):
-    def test_renderer_displays_answer_content_message_and_nested_answers(self) -> None:
+    def test_renderer_displays_answer_content_message_response_text_and_nested_answers(self) -> None:
         self.assertIn("你好，我是 AURA Research。", render_chat_answer('{ ok: true, answer: "你好，我是 AURA Research。" }'))
         self.assertIn("正常 content 回复", render_chat_answer('{ ok: true, content: "正常 content 回复" }'))
         self.assertIn("正常 message 回复", render_chat_answer('{ ok: true, message: "正常 message 回复" }'))
+        self.assertIn("正常 response 回复", render_chat_answer('{ ok: true, response: "正常 response 回复" }'))
+        self.assertIn("正常 text 回复", render_chat_answer('{ ok: true, text: "正常 text 回复" }'))
         self.assertIn("nested result answer", render_chat_answer('{ ok: true, result: { answer: "nested result answer" } }'))
         self.assertIn("nested data answer", render_chat_answer('{ ok: true, data: { answer: "nested data answer" } }'))
 
     def test_renderer_hides_internal_task_handoff_but_not_explanations(self) -> None:
-        hidden = render_chat_answer('{ ok: true, answer: "Research Task Handoff\\nTaskSpec: task_123\\nExecutionResult: success\\nMemory: internal" }')
+        hidden = render_chat_answer('{ ok: true, answer: "Research Task Handoff\\nTaskSpec: task_123\\nExecutionResult: success" }')
         self.assertIn("该响应来自任务执行链路，已隐藏内部交接内容。请在实验模式或任务页查看详情。", hidden)
         self.assertNotIn("task_123", hidden)
         self.assertNotIn("ExecutionResult: success", hidden)

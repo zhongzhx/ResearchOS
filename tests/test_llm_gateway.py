@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from backend.researchos.llm import gateway
 from backend.researchos.llm.gateway import get_llm_config_for_agent, call_llm, check_llm_connection
 from backend.researchos.settings.secret_store import delete_llm_settings, save_llm_settings
 
@@ -68,6 +69,10 @@ class LlmGatewayTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["agent_name"], "execution_agent")
         self.assertEqual(result["provider"], "mock")
+
+    def test_legacy_test_llm_connection_alias_is_not_pytest_test(self) -> None:
+        self.assertIs(gateway.test_llm_connection, gateway.check_llm_connection)
+        self.assertFalse(getattr(gateway.test_llm_connection, "__test__", True))
 
     def test_live_provider_delegates_to_mvp_llm_adapter(self) -> None:
         save_llm_settings(

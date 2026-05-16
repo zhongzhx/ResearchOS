@@ -56,7 +56,6 @@ function internalHandoffSignals(value) {
     /\bPipeline\b/.test(body) ? "Pipeline" : "",
     /\btask_[a-z0-9_-]+\b/i.test(body) ? "task_" : "",
     /Final task status/i.test(body) ? "Final task status" : "",
-    /\bMemory\s*:/i.test(body) ? "Memory:" : "",
     /Pending Skill/i.test(body) ? "Pending Skill" : "",
   ].filter(Boolean);
 }
