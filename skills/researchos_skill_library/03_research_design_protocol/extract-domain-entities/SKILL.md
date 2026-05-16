@@ -12,7 +12,7 @@ Use this skill to turn evidence text into domain memory for biological, chemical
 ## Fast Path
 
 ```powershell
-py .\scripts\extract_domain_entities.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --project-name "my_project" --field all --output-root ".\entity_runs"
+py .\scripts\extract_domain_entities.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --project-name "my_project" --field all --output-root ".\entity_runs"
 ```
 
 Extract from a file:

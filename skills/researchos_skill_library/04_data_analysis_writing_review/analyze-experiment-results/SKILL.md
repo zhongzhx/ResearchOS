@@ -12,7 +12,7 @@ Use this skill after experiments or computational runs produce results. It ranks
 ## Fast Path
 
 ```powershell
-py .\scripts\analyze_experiment_results.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --project-name "my_project" --result-file ".\results.csv" --metric "yield:max" --metric "impurity:min" --output-root ".\result_analysis"
+py .\scripts\analyze_experiment_results.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --project-name "my_project" --result-file ".\results.csv" --metric "yield:max" --metric "impurity:min" --output-root ".\result_analysis"
 ```
 
 ## Analysis Standard

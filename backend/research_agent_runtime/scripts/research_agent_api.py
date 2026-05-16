@@ -709,7 +709,18 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         if path == "/health":
-            json_response(self, 200, {"status": "ok", "state_db": str(state_db(CONFIG.agent_root)), "log_path": str(api_log_path())})
+            json_response(
+                self,
+                200,
+                {
+                    "status": "ok",
+                    "api_script": str(Path(__file__).resolve()),
+                    "workspace_root": str(workspace_root),
+                    "agent_root": str(CONFIG.agent_root),
+                    "state_db": str(state_db(CONFIG.agent_root)),
+                    "log_path": str(api_log_path()),
+                },
+            )
             return
 
         if path == "/api/settings/llm":

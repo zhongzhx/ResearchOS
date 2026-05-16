@@ -20,7 +20,6 @@ class SkillFolderLayoutTests(unittest.TestCase):
 
     def test_each_listed_canonical_skill_has_skill_md(self) -> None:
         expected_paths = [
-            "01_core_runtime_memory/research-agent-runtime/SKILL.md",
             "01_core_runtime_memory/manage-agent-memory/SKILL.md",
             "01_core_runtime_memory/ingest-research-evidence/SKILL.md",
             "01_core_runtime_memory/build-user-research-kb/SKILL.md",

@@ -128,7 +128,7 @@ def literature_demo_payload(project_id: str = "demo_project", keywords: list[str
         "project_id": project_id,
         "task_id": task_id,
         "selected_pipeline": "literature_harvest",
-        "required_skills": ["research-agent-runtime", "compliant-literature-access", "keyword-research-harvest", "extract-first-article-keywords", "build-user-research-kb"],
+        "required_skills": ["compliant-literature-access", "keyword-research-harvest", "extract-first-article-keywords", "build-user-research-kb"],
         "execution_status": "partial",
         "summary": f"Created a literature harvest task for: {', '.join(keywords)}. Demo mode records references/paper requests without external network access.",
         "result": {"keywords": keywords, "references": references, "paper_requests": paper_requests, "kb_status": "not_connected"},

@@ -7,7 +7,7 @@ export function renderProjectSwitcher(projects, activeProjectId) {
   const options = projects
     .map((project) => {
       const id = project.id || project.project_id || "";
-      const name = project.title || project.name || id || "未命名项目";
+      const name = project.display_name || project.title || project.name || "未命名项目";
       return `<option value="${escapeHtml(id)}"${id === activeProjectId ? " selected" : ""}>${escapeHtml(text(name))}</option>`;
     })
     .join("");

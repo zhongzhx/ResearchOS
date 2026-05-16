@@ -30,7 +30,7 @@ py .\scripts\browser_research_learning.py --query "your topic" --output-root ".\
 Write learning records into a KB:
 
 ```powershell
-py .\scripts\browser_learning_to_kb.py --kb-root "..\research-agent-runtime\agent_data\kbs\my_project" --learning-run ".\browser_learning_runs\<run>"
+py .\scripts\browser_learning_to_kb.py --kb-root "..\..\..\..\agent_data\kbs\my_project" --learning-run ".\browser_learning_runs\<run>"
 ```
 
 Run it as part of the complete agent loop:

@@ -2,34 +2,6 @@
   "version": "1.0",
   "skills": [
     {
-      "skill_id": "research-agent-runtime",
-      "display_name": "Research Agent Runtime",
-      "category": "01_core_runtime_memory",
-      "canonical_path": "skills/researchos_skill_library/01_core_runtime_memory/research-agent-runtime/SKILL.md",
-      "legacy_paths": [
-        "research-agent-runtime/SKILL.md"
-      ],
-      "status": "active",
-      "owner": {
-        "planner": "brain_agent",
-        "executor": "execution_agent"
-      },
-      "allowed_auto_call": true,
-      "requires_user_authorization": false,
-      "risk_level": "medium",
-      "input_types": [
-        "task"
-      ],
-      "output_types": [
-        "runtime_result"
-      ],
-      "promotion_targets": [
-        "execution_memory",
-        "project_memory"
-      ],
-      "notes": "Core runtime wrapper; must not leak secrets into logs."
-    },
-    {
       "skill_id": "manage-agent-memory",
       "display_name": "Manage Agent Memory",
       "category": "01_core_runtime_memory",

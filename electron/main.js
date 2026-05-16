@@ -1,4 +1,4 @@
-const { app, BrowserWindow, nativeTheme } = require("electron");
+const { app, BrowserWindow, dialog, nativeTheme } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -18,6 +18,7 @@ const AGENT_ROOT = process.env.RESEARCHOS_AGENT_ROOT || path.join(ROOT, "agent_d
 const API_HOST = process.env.RESEARCHOS_HOST || "127.0.0.1";
 const API_PORT = Number(process.env.RESEARCHOS_PORT || "8765");
 const API_BASE_URL = `http://${API_HOST}:${API_PORT}`;
+const BACKEND_REQUIRED_BEFORE_WINDOW = true;
 
 let apiProcess = null;
 let webServer = null;
@@ -37,11 +38,100 @@ function requestBackend(pathname, options = {}) {
   });
 }
 
-async function backendReady() {
+function requestBackendJson(pathname, options = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(`${API_BASE_URL}${pathname}`, options, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        try {
+          const body = Buffer.concat(chunks).toString("utf8");
+          resolve({ statusCode: response.statusCode || 0, data: body ? JSON.parse(body) : {} });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on("error", reject);
+    request.setTimeout(2000, () => {
+      request.destroy(new Error("backend timeout"));
+    });
+    request.end();
+  });
+}
+
+function normalizePathForCompare(value) {
+  return path.resolve(String(value || "")).toLowerCase();
+}
+
+async function backendHealth() {
   try {
-    return (await requestBackend("/health", { method: "GET" })) === 200;
+    const health = await requestBackendJson("/health", { method: "GET" });
+    if (health.statusCode !== 200 || health.data?.status !== "ok") {
+      return null;
+    }
+    return health.data;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+async function backendReady() {
+  return Boolean(await backendHealth());
+}
+
+function backendMatchesThisClient(health) {
+  return normalizePathForCompare(health?.api_script) === normalizePathForCompare(API_SCRIPT);
+}
+
+function execCommand(command, args) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const chunks = [];
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.on("error", () => resolve(""));
+    child.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
+}
+
+async function portOwnerPids() {
+  if (process.platform === "win32") {
+    const script = `Get-NetTCPConnection -LocalPort ${API_PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
+    const output = await execCommand("powershell.exe", ["-NoProfile", "-Command", script]);
+    return output
+      .split(/\r?\n/)
+      .map((line) => Number(line.trim()))
+      .filter(Boolean);
+  }
+  const output = await execCommand("sh", ["-lc", `lsof -ti tcp:${API_PORT} -sTCP:LISTEN 2>/dev/null || true`]);
+  return output
+    .split(/\r?\n/)
+    .map((line) => Number(line.trim()))
+    .filter(Boolean);
+}
+
+async function stopBackendOnConfiguredPort() {
+  const pids = await portOwnerPids();
+  for (const pid of pids) {
+    if (apiProcess && apiProcess.pid === pid) {
+      continue;
+    }
+    if (process.platform === "win32") {
+      await execCommand("taskkill.exe", ["/PID", String(pid), "/T", "/F"]);
+    } else {
+      try {
+        process.kill(pid);
+      } catch {
+        // The process may already have exited.
+      }
+    }
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (!(await backendHealth())) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
@@ -56,8 +146,12 @@ function pythonCommand() {
 }
 
 async function startBackend() {
-  if (await backendReady()) {
-    return;
+  const existingHealth = await backendHealth();
+  if (existingHealth) {
+    if (backendMatchesThisClient(existingHealth)) {
+      return;
+    }
+    await stopBackendOnConfiguredPort();
   }
   fs.mkdirSync(AGENT_ROOT, { recursive: true });
   const logRoot = path.join(AGENT_ROOT, "logs");
@@ -107,6 +201,16 @@ async function startBackend() {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error("ResearchOS API startup timed out");
+}
+
+async function ensureBackendStartedForClient() {
+  if (!BACKEND_REQUIRED_BEFORE_WINDOW) {
+    return;
+  }
+  await startBackend();
+  if (!(await backendReady())) {
+    throw new Error(`ResearchOS API is not healthy at ${API_BASE_URL}`);
+  }
 }
 
 function contentTypeFor(filePath) {
@@ -204,7 +308,7 @@ function startWebServer() {
 
 async function createWindow() {
   nativeTheme.themeSource = "light";
-  await startBackend();
+  await ensureBackendStartedForClient();
   const webPort = await startWebServer();
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -224,7 +328,7 @@ async function createWindow() {
 }
 
 async function runSmokeTest() {
-  await startBackend();
+  await ensureBackendStartedForClient();
   const webPort = await startWebServer();
   const backendStatus = await requestBackend("/health", { method: "GET" });
   console.log(JSON.stringify({ ok: true, webPort, backendStatus }));
@@ -243,7 +347,11 @@ if (process.argv.includes("--smoke-test")) {
     app.exit(1);
   });
 } else {
-  app.whenReady().then(createWindow);
+  app.whenReady().then(createWindow).catch((error) => {
+    console.error(error);
+    dialog.showErrorBox("AURA Research 后端启动失败", `${error.message}\n\n日志位置：${path.join(AGENT_ROOT, "logs", "researchos_api.log")}`);
+    app.exit(1);
+  });
 }
 
 app.on("window-all-closed", () => {

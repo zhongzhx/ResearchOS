@@ -1,6 +1,8 @@
 const BACKEND_PREFIX = "/api/backend";
 const REQUEST_TIMEOUT_MS = 8000;
 const MUTATION_TIMEOUT_MS = 60000;
+export const DEFAULT_PROJECT_ID = "default";
+const DEFAULT_CHAT_SESSION_ID = "default-chat-session";
 
 function safeError(error) {
   if (!error) return "请求失败";
@@ -24,7 +26,28 @@ function withProject(path, projectId, params = {}) {
   return `${path}${makeQuery({ project_id: projectId, ...params })}`;
 }
 
+function stableId(value, fallback) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+}
+
+function defaultChatSessionId(projectId) {
+  const normalizedProjectId = String(projectId || DEFAULT_PROJECT_ID)
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${DEFAULT_CHAT_SESSION_ID}-${normalizedProjectId || DEFAULT_PROJECT_ID}`;
+}
+
 async function request(method, path, body, timeoutMs = REQUEST_TIMEOUT_MS) {
+  if (window.location.protocol === "file:") {
+    return {
+      ok: false,
+      data: null,
+      error: "请通过 Electron 或本地服务启动 AURA Research，直接打开 web_client/index.html 无法连接后端。",
+      status: 0,
+    };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -59,6 +82,15 @@ async function request(method, path, body, timeoutMs = REQUEST_TIMEOUT_MS) {
   }
 }
 
+function notConnected(feature, detail = "该功能入口已预留，当前后端尚未接入真实执行链路。") {
+  return Promise.resolve({
+    ok: false,
+    data: { ok: false, status: "not_connected", feature, detail },
+    error: detail,
+    status: 0,
+  });
+}
+
 export function apiGet(path) {
   return request("GET", path, undefined, REQUEST_TIMEOUT_MS);
 }
@@ -75,6 +107,7 @@ export function apiDelete(path) {
   return request("DELETE", path, undefined, MUTATION_TIMEOUT_MS);
 }
 
+// legacy_stable: MVP runtime and ResearchOS local data APIs.
 export const getHealth = () => apiGet("/health");
 export const getProjects = () => apiGet("/research-os/projects");
 export const getTasks = (projectId) => apiGet(withProject("/research-os/tasks", projectId, { limit: 100 }));
@@ -83,16 +116,41 @@ export const getReferences = (projectId, search = "") => apiGet(withProject("/re
 export const getMemoryContext = (projectId, query = "Current project summary") =>
   apiGet(withProject("/research-os/memory/context", projectId, { query, limit: 30 }));
 export const getMemoryReviewQueue = (projectId) => apiGet(withProject("/research-os/memory/review-queue", projectId, { status: "pending" }));
-export const sendLegacyChat = (message, projectId, conversationId = "") =>
-  apiPost("/research-os/agent/chat", { message, project_id: projectId, conversation_id: conversationId });
-export const runCoordinator = (userQuery, projectId, conversationId = "") =>
-  apiPost("/api/agents/coordinator/run", { user_query: userQuery, project_id: projectId, conversation_id: conversationId });
+export const sendLegacyChat = (message, projectId, conversationId = "", sessionId = "") => {
+  const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID);
+  const safeConversationId = stableId(conversationId, stableId(sessionId, defaultChatSessionId(safeProjectId)));
+  const safeSessionId = stableId(sessionId, safeConversationId);
+  return apiPost("/research-os/agent/chat", {
+    message,
+    project_id: safeProjectId,
+    conversation_id: safeConversationId,
+    session_id: safeSessionId,
+  });
+};
+
+// experimental: only call when the user explicitly enables dual-agent mode.
+export const runCoordinator = (userQuery, projectId, conversationId = "", sessionId = "") => {
+  const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID);
+  const safeConversationId = stableId(conversationId, stableId(sessionId, defaultChatSessionId(safeProjectId)));
+  const safeSessionId = stableId(sessionId, safeConversationId);
+  return apiPost("/api/agents/coordinator/run", {
+    user_query: userQuery,
+    project_id: safeProjectId,
+    conversation_id: safeConversationId,
+    session_id: safeSessionId,
+  });
+};
 export const runDualAgentDemo = (projectId) => apiGet(withProject("/api/demo/dual-agent", projectId));
+
+// demo_only: product feature contracts and demo previews. Real product execution is not wired from the UI.
 export const getProductFeatures = () => apiGet("/api/product/features");
 export const getProductFeature = (featureId) => apiGet(`/api/product/features/${encodeURIComponent(featureId)}`);
-export const runProductFeature = (featureId, payload = {}) => apiPost(`/api/product/features/${encodeURIComponent(featureId)}/run`, payload);
+export const runProductFeature = (featureId, payload = {}) =>
+  notConnected(featureId, "该产品功能入口已预留，当前后端尚未接入真实执行链路；请使用 demo_only 预览。");
 export const runProductFeatureDemo = (featureId, projectId) => apiGet(withProject(`/api/product/features/${encodeURIComponent(featureId)}/demo`, projectId));
-export const runProductDemoFlow = (projectId) => apiPost("/api/demo/product-flow/run", { project_id: projectId });
+export const runProductDemoFlow = (projectId) => apiGet(withProject("/api/demo/product-flow", projectId));
+
+// experimental: skill catalog, pipeline registry, route tester, and generated skill review.
 export const getSkillCatalog = () => apiGet("/api/skills/catalog");
 export const getSkillPipelines = () => apiGet("/api/skills/pipelines");
 export const routeSkillQuery = (query, projectId) => apiPost("/api/skills/route", { user_query: query, project_id: projectId });
@@ -100,6 +158,8 @@ export const getResolverHealth = () => apiGet("/api/skills/resolver/check");
 export const getPendingSkills = () => apiGet("/api/self-evolution/pending-skills");
 export const activatePendingSkill = (skillName) => apiPost(`/api/self-evolution/skills/${encodeURIComponent(skillName)}/activate`, {});
 export const rejectPendingSkill = (skillName, reason) => apiPost(`/api/self-evolution/skills/${encodeURIComponent(skillName)}/reject`, { reason });
+
+// experimental: MemoryOS read/actions are gated by RESEARCHOS_MEMORYOS_ENABLED.
 export const getWorkingMemory = (projectId) => apiGet(withProject("/api/memory/working", projectId));
 export const getCognitiveState = (projectId) => apiGet(withProject("/api/memory/cognitive-state", projectId));
 export const refreshCognitiveState = (projectId, taskId = "") => apiPost("/api/memory/cognitive-state/refresh", { project_id: projectId, task_id: taskId });
@@ -110,6 +170,8 @@ export const getMemoryHealth = (projectId) => apiGet(withProject("/api/memory/he
 export const runMemoryMaintenance = (projectId, dryRun = true) => apiPost("/api/memory/maintenance/run", { project_id: projectId, dry_run: dryRun });
 export const getMemoryEvents = (projectId) => apiGet(withProject("/api/memory/events", projectId, { limit: 100 }));
 export const checkAutonomousLearning = (projectId) => apiPost("/api/memory/autonomous-learning/check", { project_id: projectId, dry_run: true });
+
+// legacy_stable: execution visibility and ResearchOS project records.
 export const getSkillRuns = (projectId) => apiGet(withProject("/research-os/skill-runs", projectId, { limit: 100 }));
 export const getExecutionMemory = (projectId) => apiGet(withProject("/research-os/execution-memory", projectId, { limit: 100 }));
 export const getClaims = (projectId) => apiGet(withProject("/research-os/claims", projectId));
@@ -124,6 +186,8 @@ export const getClaimReview = (projectId) => apiGet(`/research-os/projects/${enc
 export const getRuntimeStatus = (projectId) => apiGet(withProject("/research-os/runtime/status", projectId));
 export const getSchedulerStatus = (projectId) => apiGet(withProject("/research-os/agent/scheduler/status", projectId));
 export const getDashboard = () => apiGet("/research-os/dashboard");
+
+// legacy_stable: project/task lifecycle mutations backed by research_os_mvp.
 export const createProject = (payload) => apiPost("/research-os/projects", payload);
 export const updateProject = (projectId, payload) => apiPut(`/research-os/projects/${encodeURIComponent(projectId)}`, payload);
 export const archiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/archive`, {});
@@ -145,6 +209,8 @@ export const upsertLegacySkill = (payload) => apiPost("/research-os/skills", pay
 export const runLegacySkill = (skillId, payload = {}) => apiPost(`/research-os/skills/${encodeURIComponent(skillId)}/run`, payload);
 export const simulatePromptRouting = (payload) => apiPost("/research-os/prompt-routing/simulate", payload);
 export const promoteExecutionMemory = (memoryId, payload = {}) => apiPost(`/research-os/execution-memory/${encodeURIComponent(memoryId)}/promote`, payload);
+
+// legacy_stable: RAG, literature, reference, and evidence read APIs.
 export const getReferenceChunks = (projectId) => apiGet(withProject("/research-os/reference-chunks", projectId, { limit: 100 }));
 export const getKnowledgeBaseEntries = (projectId) => apiGet(withProject("/research-os/knowledge-base-entries", projectId, { limit: 100 }));
 export const getRagQueries = (projectId) => apiGet(withProject("/research-os/rag-queries", projectId, { limit: 50 }));
@@ -153,9 +219,13 @@ export const getPaperRequests = (projectId) => apiGet(withProject("/research-os/
 export const getUnmatchedPdfs = (projectId) => apiGet(withProject("/research-os/literature/unmatched-pdfs", projectId, { limit: 50 }));
 export const getAgentFeed = (projectId) => apiGet(withProject("/research-os/agent-feed", projectId, { limit: 50 }));
 export const getWorkflowBoard = (projectId) => apiGet(withProject("/research-os/workflow-board", projectId));
+
+// implemented: LLM settings API backed by backend.researchos.settings.
 export const getLlmSettings = () => apiGet("/api/settings/llm");
 export const saveLlmSettings = (payload) => apiPost("/api/settings/llm", payload);
 export const testLlmSettings = (payload) => apiPost("/api/settings/llm/test", payload);
+
+// legacy_stable: RAG, literature, reference, and evidence mutation APIs.
 export const createLiteratureSearchTask = (payload) => apiPost("/research-os/literature/search-tasks", payload);
 export const cancelLiteratureSearchTask = (taskId) => apiPost(`/research-os/literature/search-tasks/${encodeURIComponent(taskId)}/cancel`, {});
 export const expandLiteratureQuery = (payload) => apiPost("/research-os/literature/expand-query", payload);
