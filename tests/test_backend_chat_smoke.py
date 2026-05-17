@@ -49,25 +49,21 @@ class BackendChatSmokeTests(unittest.TestCase):
         self.assertNotIn("TaskSpec", answer)
         self.assertNotIn("ExecutionResult", answer)
 
-    def test_chat_recovers_when_conversation_id_belongs_to_another_project(self) -> None:
+    def test_chat_rejects_when_conversation_id_belongs_to_another_project(self) -> None:
         alpha = ros.create_project(self.agent_root, {"id": "alpha_project", "title": "Alpha Project"})
         beta = ros.create_project(self.agent_root, {"id": "beta_project", "title": "Beta Project"})
         ros.ensure_chat_session(self.agent_root, alpha["id"], "shared_chat_session", title="Alpha chat")
 
-        result = ros.agent_chat(
-            self.agent_root,
-            {
-                "message": "你好",
-                "project_id": beta["id"],
-                "conversation_id": "shared_chat_session",
-                "session_id": "shared_chat_session",
-            },
-        )
-
-        answer = result.get("answer") or result.get("content") or result.get("message") or ""
-        self.assertTrue(result.get("ok"))
-        self.assertTrue(answer.strip())
-        self.assertNotEqual(result.get("conversation_id"), "shared_chat_session")
+        with self.assertRaisesRegex(ValueError, "belongs to a different project"):
+            ros.agent_chat(
+                self.agent_root,
+                {
+                    "message": "你好",
+                    "project_id": beta["id"],
+                    "conversation_id": "shared_chat_session",
+                    "session_id": "shared_chat_session",
+                },
+            )
 
 
 if __name__ == "__main__":

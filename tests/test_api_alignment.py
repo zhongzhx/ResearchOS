@@ -90,7 +90,9 @@ class ApiAlignmentTests(unittest.TestCase):
         library_js = read(LIBRARY_JS)
 
         self.assertIn('runProductDemoFlow = (projectId) => apiGet(withProject("/api/demo/product-flow"', api_js)
-        self.assertIn("runProductFeatureDemo", library_js)
+        self.assertNotIn("runProductFeatureDemo", library_js)
+        self.assertIn("createLiteratureSearchTask", library_js)
+        self.assertIn("runLiteratureSearch", library_js)
         self.assertNotIn("/api/demo/product-flow/run", api_js + chat_js)
         self.assertNotIn("runProductFeature(", library_js)
         self.assertNotIn("/api/product/features/${encodeURIComponent(featureId)}/run", api_js)

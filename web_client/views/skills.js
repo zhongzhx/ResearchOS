@@ -17,7 +17,13 @@ import { jsonDetails, jsonViewer } from "../components/json_viewer.js";
 let activeTab = "目录";
 let routeResult = null;
 let filter = "";
+let categoryFilter = "";
+let riskFilter = "";
+let authorizationFilter = "";
+let autoCallFilter = "";
+let statusFilter = "";
 const tabs = ["功能流程", "目录", "流程", "路由测试", "待处理技能", "解析器健康"];
+const INTERNAL_CONTROL_SKILLS = new Set(["skill-router-orchestrator", "evidence-promotion", "context-compiler-maintenance", "skill-output-validator"]);
 
 function tabButtons() {
   return `<div class="tabs">${tabs.map((tab) => `<button class="tab ${tab === activeTab ? "is-active" : ""}" type="button" data-skills-tab="${tab}">${tab}</button>`).join("")}</div>`;
@@ -28,8 +34,62 @@ function disabled(result) {
 }
 
 function filtered(rows) {
-  if (!filter) return rows;
-  return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(filter.toLowerCase()));
+  return rows.filter((row) => {
+    const text = JSON.stringify(row).toLowerCase();
+    const risk = String(row.risk_level || "").toLowerCase();
+    const category = String(row.category || "").toLowerCase();
+    const status = String(row.status || "").toLowerCase();
+    const requiresAuth = Boolean(row.requires_user_authorization);
+    const allowedAutoCall = row.allowed_auto_call !== false;
+    return (
+      (!filter || text.includes(filter.toLowerCase())) &&
+      (!categoryFilter || category.includes(categoryFilter.toLowerCase())) &&
+      (!riskFilter || risk.includes(riskFilter.toLowerCase())) &&
+      (!statusFilter || status.includes(statusFilter.toLowerCase())) &&
+      (!authorizationFilter || String(requiresAuth) === authorizationFilter) &&
+      (!autoCallFilter || String(allowedAutoCall) === autoCallFilter)
+    );
+  });
+}
+
+function filterControls() {
+  return `<div class="form-grid">
+    <label class="field-label">category<input class="search-input" id="categoryFilter" value="${escapeHtml(categoryFilter)}" /></label>
+    <label class="field-label">risk_level<input class="search-input" id="riskFilter" value="${escapeHtml(riskFilter)}" placeholder="low / medium / high" /></label>
+    <label class="field-label">requires_user_authorization<select class="search-input" id="authorizationFilter">
+      <option value="">全部</option>
+      <option value="true" ${authorizationFilter === "true" ? "selected" : ""}>true</option>
+      <option value="false" ${authorizationFilter === "false" ? "selected" : ""}>false</option>
+    </select></label>
+    <label class="field-label">allowed_auto_call<select class="search-input" id="autoCallFilter">
+      <option value="">全部</option>
+      <option value="true" ${autoCallFilter === "true" ? "selected" : ""}>true</option>
+      <option value="false" ${autoCallFilter === "false" ? "selected" : ""}>false</option>
+    </select></label>
+    <label class="field-label">status<input class="search-input" id="statusFilter" value="${escapeHtml(statusFilter)}" /></label>
+  </div>`;
+}
+
+function catalogCard(skill) {
+  const skillId = skill.skill_id || skill.name || "";
+  const isInternal = INTERNAL_CONTROL_SKILLS.has(skillId) || skill.category === "internal/control";
+  const requiresAuthorization = Boolean(skill.requires_user_authorization) || String(skill.risk_level || "").toLowerCase() === "high";
+  const status = isInternal ? "internal/control" : requiresAuthorization ? "需要授权" : skill.status || "目录";
+  return `<article class="item-card">
+    <h3 class="item-title">${escapeHtml(skill.display_name || skill.name || skillId || "技能")}</h3>
+    <p class="item-subtitle">${escapeHtml(skill.canonical_path || skill.path || "暂无标准路径记录")}</p>
+    <div class="item-meta">
+      ${badge(`skill_id: ${skillId}`)}
+      ${badge(`category: ${skill.category || "uncategorized"}`)}
+      ${badge(`risk_level: ${skill.risk_level || "unknown"}`, String(skill.risk_level || "").toLowerCase() === "high" ? "warning" : "muted")}
+      ${badge(`allowed_auto_call: ${skill.allowed_auto_call !== false}`)}
+      ${badge(`requires_user_authorization: ${Boolean(skill.requires_user_authorization)}`, skill.requires_user_authorization ? "warning" : "muted")}
+      ${badge(status, isInternal || requiresAuthorization ? "warning" : "success")}
+    </div>
+    ${jsonDetails("input_types", skill.input_types || [])}
+    ${jsonDetails("output_types", skill.output_types || [])}
+    ${jsonDetails("promotion_targets", skill.promotion_targets || [])}
+  </article>`;
 }
 
 function catalogView(result) {
@@ -37,21 +97,7 @@ function catalogView(result) {
   if (!result.ok) return apiErrorCard(result, "技能目录不可用");
   const rows = filtered(firstArray(result.data, ["skills"]));
   if (!rows.length) return emptyState("没有匹配技能", "请尝试其他分类、状态或技能 id。");
-  return `<div class="list">${rows
-    .slice(0, 120)
-    .map((skill) =>
-      itemCard({
-        title: skill.skill_id || skill.name,
-        subtitle: skill.canonical_path || skill.path || "暂无标准路径记录",
-        status: skill.status || skill.category || "目录",
-        meta: [
-          skill.category,
-          skill.allowed_auto_call === false ? { label: "需手动", tone: "warning" } : { label: "可自动调用", tone: "success" },
-          skill.requires_user_authorization ? { label: "需授权", tone: "warning" } : "",
-        ].filter(Boolean),
-      }),
-    )
-    .join("")}</div>`;
+  return `${filterControls()}<div class="list">${rows.slice(0, 120).map(catalogCard).join("")}</div>`;
 }
 
 function productFlowsView(result) {
@@ -83,13 +129,26 @@ function pipelinesView(result) {
 }
 
 function routeTester() {
+  const routeData = routeResult?.data || routeResult || {};
+  const selectedPipeline = routeData.selected_pipeline || routeData.pipeline || routeData.pipeline_name || routeData.selected?.pipeline || "暂无";
+  const requiredSkills = routeData.required_skills || routeData.execution_skills || routeData.skills || [];
+  const authorizationNeeded = routeData.authorization_needed ?? routeData.requires_user_authorization ?? false;
+  const riskFlags = routeData.risk_flags || routeData.risks || [];
+  const reason = routeData.reason || routeData.explanation || routeData.route_reason || "";
   return `<div class="grid">
     <div class="form-row">
       <label for="routeQuery">自然语言请求</label>
       <input class="text-input" id="routeQuery" lang="zh-CN" placeholder="收集巨噬细胞先天免疫相关论文" />
     </div>
     <div><button class="button primary" type="button" id="routeButton">测试路由</button></div>
-    ${routeResult ? jsonViewer(routeResult) : emptyState("暂无路由测试", "输入请求后可以查看选择的流程、匹配技能和授权需求。")}
+    ${routeResult ? `<div class="grid">
+      ${itemCard({ title: "selected pipeline", subtitle: selectedPipeline, status: "route" })}
+      ${itemCard({ title: "required skills", subtitle: JSON.stringify(requiredSkills), status: "skills" })}
+      ${itemCard({ title: "authorization needed", subtitle: String(authorizationNeeded), status: authorizationNeeded ? "需要授权" : "ok" })}
+      ${itemCard({ title: "risk flags", subtitle: JSON.stringify(riskFlags), status: riskFlags.length ? "warning" : "ok" })}
+      ${itemCard({ title: "reason", subtitle: reason || "暂无路由说明", status: "reason" })}
+      ${jsonDetails("raw JSON", routeResult)}
+    </div>` : emptyState("暂无路由测试", "输入请求后可以查看选择的流程、匹配技能和授权需求。")}
   </div>`;
 }
 
@@ -148,6 +207,18 @@ export async function renderSkillsView({ root }) {
   root.querySelector("#skillFilter").addEventListener("input", (event) => {
     filter = event.target.value;
     renderSkillsView({ root });
+  });
+  ["categoryFilter", "riskFilter", "authorizationFilter", "autoCallFilter", "statusFilter"].forEach((id) => {
+    const element = root.querySelector(`#${id}`);
+    if (!element) return;
+    element.addEventListener("input", (event) => {
+      if (id === "categoryFilter") categoryFilter = event.target.value;
+      if (id === "riskFilter") riskFilter = event.target.value;
+      if (id === "authorizationFilter") authorizationFilter = event.target.value;
+      if (id === "autoCallFilter") autoCallFilter = event.target.value;
+      if (id === "statusFilter") statusFilter = event.target.value;
+      renderSkillsView({ root });
+    });
   });
   root.querySelectorAll("[data-skills-tab]").forEach((button) => {
     button.addEventListener("click", () => {

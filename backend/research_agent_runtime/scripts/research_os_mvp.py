@@ -16617,12 +16617,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
     ensure_default_chat_project(agent_root, project_id)
     requested_conversation_id = clean(payload.get("conversation_id") or payload.get("session_id"))
-    try:
-        conversation = ensure_chat_session(agent_root, project_id, requested_conversation_id, title=message[:80])
-    except ValueError as exc:
-        if "different project" not in str(exc):
-            raise
-        conversation = ensure_chat_session(agent_root, project_id, "", title=message[:80])
+    conversation = ensure_chat_session(agent_root, project_id, requested_conversation_id, title=message[:80])
     conversation_id = conversation["id"]
     history_before = list_chat_messages(agent_root, conversation_id, project_id, limit=int(payload.get("conversation_limit") or 16))
     previous_intent = clean(payload.get("previous_intent")) or latest_chat_intent(history_before)
