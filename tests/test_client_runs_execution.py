@@ -16,7 +16,7 @@ class ClientRunsExecutionTests(unittest.TestCase):
         for field in ["skill_id", "started_at", "finished_at", "project_id", "artifacts", "validation_report", "unresolved_items"]:
             self.assertIn(field, source)
 
-        for field in ["summary", "confidence", "safe_to_promote", "source skillrun_id", "promoted"]:
+        for field in ["summary", "confidence", "safe_to_promote", "来源技能运行", "已加入"]:
             self.assertIn(field, source)
 
     def test_promote_only_for_safe_execution_memory_and_requires_confirm(self) -> None:

@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import html
 import json
-import os
 import re
 import shutil
 import ssl
@@ -16,14 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
-try:
-    import sys
-
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 USER_AGENT = "keyword-research-harvest/0.1"
@@ -38,6 +29,16 @@ PAYWALL_MARKERS = [
 ]
 
 
+def _safe_read_csv(path: Path) -> pd.DataFrame:
+    """Read a CSV, returning empty DataFrame if file is empty or corrupt."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError):
+        return pd.DataFrame()
+
+
 def clean_text(value: Any) -> str:
     if value is None:
         return ""
@@ -46,35 +47,6 @@ def clean_text(value: Any) -> str:
     text = html.unescape(str(value))
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
-
-
-def short_download_filename(record_id: Any, stem: str, extension: str) -> str:
-    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(record_id or "record")).strip("._-") or "record"
-    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(stem or "")).strip("._-")
-    safe_stem = safe_stem[:42].strip("._-")
-    return f"{safe_id}_{safe_stem}{extension}" if safe_stem else f"{safe_id}{extension}"
-
-
-def work_path(run_root: Path, legacy_name: str, work_name: str | None = None, *, prefer_legacy: bool = False) -> Path:
-    legacy = run_root / legacy_name
-    modern = run_root / "_work" / (work_name or legacy_name)
-    if prefer_legacy and legacy.exists() and not modern.exists():
-        return legacy
-    return modern
-
-
-def long_path(path: Path) -> str:
-    resolved = str(path.resolve())
-    if os.name != "nt" or resolved.startswith("\\\\?\\"):
-        return resolved
-    if resolved.startswith("\\\\"):
-        return "\\\\?\\UNC\\" + resolved[2:]
-    return "\\\\?\\" + resolved
-
-
-def copy_file(src: Path, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(long_path(src), long_path(dst))
 
 
 def normalize_doi(value: Any) -> str:
@@ -134,33 +106,12 @@ def request_url(url: str, timeout: int) -> dict[str, Any]:
         }
 
 
-def looks_like_direct_fulltext_url(url: str) -> bool:
-    lowered = (url or "").lower()
-    if not lowered.startswith(("http://", "https://")):
-        return False
-    return any(
-        token in lowered
-        for token in [
-            ".pdf",
-            "/pdf",
-            "pdf=",
-            "download",
-            "fulltextxml",
-            "fulltext/xml",
-            ".xml",
-        ]
-    )
-
-
 def candidate_urls(row: pd.Series) -> list[str]:
     urls: list[str] = []
-    for key in ["pdf_url", "fulltext_url", "landing_page_url"]:
+    for key in ["pdf_url", "fulltext_url", "landing_page_url", "pdf_url_candidate"]:
         value = clean_text(row.get(key))
-        if value:
+        if value.startswith("http://") or value.startswith("https://"):
             urls.append(value)
-    doi = normalize_doi(row.get("doi"))
-    if doi:
-        urls.append(f"https://doi.org/{doi}")
     raw_json = clean_text(row.get("candidate_urls_json"))
     if raw_json:
         try:
@@ -173,10 +124,13 @@ def candidate_urls(row: pd.Series) -> list[str]:
                         value = clean_text(item.get("url"))
                     else:
                         value = ""
-                    if value:
+                    if value.startswith("http://") or value.startswith("https://"):
                         urls.append(value)
         except json.JSONDecodeError:
             pass
+    doi = normalize_doi(row.get("doi"))
+    if doi:
+        urls.append(f"https://doi.org/{doi}")
     unique: list[str] = []
     seen: set[str] = set()
     for url in urls:
@@ -186,7 +140,8 @@ def candidate_urls(row: pd.Series) -> list[str]:
     return unique
 
 
-def request_row_download(row: pd.Series, pdf_dir: Path, non_pdf_dir: Path, timeout: int, max_attempts: int) -> dict[str, Any]:
+def request_row_download(row: pd.Series, pdf_dir: Path, timeout: int, max_attempts: int,
+                         institutional_resolver: Any = None) -> dict[str, Any]:
     stem = clean_text(row.get("record_id"))
     status = "metadata_only"
     reason = "no_candidate_url"
@@ -194,9 +149,6 @@ def request_row_download(row: pd.Series, pdf_dir: Path, non_pdf_dir: Path, timeo
     final_url = ""
     content_format = ""
     attempts = 0
-    fallback_path = ""
-    fallback_url = ""
-    fallback_format = ""
     for url in candidate_urls(row)[:max_attempts]:
         attempts += 1
         try:
@@ -213,18 +165,8 @@ def request_row_download(row: pd.Series, pdf_dir: Path, non_pdf_dir: Path, timeo
                 extension = ".html"
             elif kind == "xml":
                 extension = ".xml"
-            output_dir = pdf_dir if kind == "pdf" else non_pdf_dir
-            output = output_dir / short_download_filename(stem, "", extension)
+            output = pdf_dir / f"{stem}{extension}"
             output.write_bytes(payload)
-            if kind != "pdf":
-                fallback_path = fallback_path or str(output)
-                fallback_url = fallback_url or final_url
-                fallback_format = fallback_format or kind
-                status = "fulltext_only"
-                reason = "non_pdf_fulltext_saved"
-                final_path = fallback_path
-                content_format = fallback_format
-                continue
             status = "success"
             reason = ""
             final_path = str(output)
@@ -247,19 +189,45 @@ def request_row_download(row: pd.Series, pdf_dir: Path, non_pdf_dir: Path, timeo
             continue
         finally:
             time.sleep(0.15)
-    if not final_path and fallback_path:
-        status = "fulltext_only"
-        reason = "non_pdf_fulltext_saved"
-        final_path = fallback_path
-        final_url = fallback_url
-        content_format = fallback_format
+
+    # ── Institutional resolver fallback ──────────────────────────
+    if status != "success" and institutional_resolver is not None:
+        doi = normalize_doi(row.get("doi"))
+        if doi:
+            resolve_result = institutional_resolver.resolve(doi, {"title": row.get("title")})
+            if resolve_result.selected_pdf_url and resolve_result.status in (
+                "oa_pdf_downloaded", "institution_pdf_downloaded",
+            ):
+                try:
+                    dl_resp = request_url(resolve_result.selected_pdf_url, timeout)
+                    if dl_resp["payload"].startswith(b"%PDF"):
+                        output = pdf_dir / f"{stem}_institutional.pdf"
+                        output.write_bytes(dl_resp["payload"])
+                        status = "institution_pdf_downloaded"
+                        reason = "institutional_resolver"
+                        final_path = str(output)
+                        final_url = resolve_result.selected_pdf_url
+                        content_format = "pdf"
+                except Exception:
+                    pass
+
+    # ── Map legacy status to DownloadStatus ──────────────────────
+    download_status = status
+    if status == "success":
+        download_status = "oa_pdf_downloaded" if content_format == "pdf" else (
+            "html_saved" if content_format == "html" else "xml_saved")
+    elif status == "inaccessible":
+        download_status = "paywall_detected_no_entitlement"
+    elif status == "broken_link":
+        download_status = "broken_link"
+
     return {
         "record_id": row.get("record_id"),
         "doi": row.get("doi"),
         "title": row.get("title"),
         "final_pdf_path": final_path,
         "final_pdf_url": final_url,
-        "download_status": status,
+        "download_status": download_status,
         "failure_reason": reason,
         "content_format": content_format,
         "attempt_count": attempts,
@@ -269,9 +237,8 @@ def request_row_download(row: pd.Series, pdf_dir: Path, non_pdf_dir: Path, timeo
 def extract_pdf_links(html_text: str, bases: list[str]) -> list[str]:
     values: list[str] = []
     for pattern in [
-        r"""href=["']([^"']+(?:\.pdf|pdf=|/pdf/|/pdf\?|download[^"']*pdf|article-pdf)[^"']*)["']""",
-        r"""(?:content|data-pdf-url|data-download-url)=["']([^"']+(?:\.pdf|pdf=|/pdf/|/pdf\?|article-pdf)[^"']*)["']""",
-        r"""["'](https?://[^"']+(?:\.pdf|pdf=|/pdf/|/pdf\?|article-pdf)[^"']*)["']""",
+        r"""href=["']([^"']+(?:\.pdf|pdf=|/pdf/|download[^"']*pdf)[^"']*)["']""",
+        r"""content=["']([^"']+(?:\.pdf|pdf=|/pdf/)[^"']*)["']""",
     ]:
         values.extend(re.findall(pattern, html_text, flags=re.IGNORECASE))
     links: list[str] = []
@@ -298,80 +265,74 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def safe_read_csv(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        return pd.read_csv(path)
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame()
-
-
-def cancel_requested(run_root: Path) -> bool:
-    return (run_root / ".researchos_cancel").exists()
-
-
-def raise_if_cancelled(run_root: Path) -> None:
-    if cancel_requested(run_root):
-        raise SystemExit("keyword harvest cancelled by user")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", required=True)
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--timeout", type=int, default=35)
     parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--institutional", action="store_true",
+                        help="Enable institutional resolver fallback for non-OA papers")
+    parser.add_argument("--browser-assisted", action="store_true",
+                        help="Enable Playwright browser-assisted download")
+    parser.add_argument("--browser-profile-dir", default=None,
+                        help="Path to persistent browser profile directory")
+    parser.add_argument("--publisher-delay", type=float, default=1.0,
+                        help="Delay between publisher requests (seconds)")
     args = parser.parse_args()
 
     run_root = Path(args.run_root).resolve()
     candidate_path = run_root / "keyword_research_candidate_table.csv"
-    pdf_dir = work_path(run_root, "downloaded_pdfs", prefer_legacy=True)
-    non_pdf_dir = work_path(run_root, "non_pdf", prefer_legacy=True)
-    log_dir = work_path(run_root, "download_logs", prefer_legacy=True)
+    pdf_dir = run_root / "downloaded_pdfs"
+    log_dir = run_root / "download_logs"
     log_path = log_dir / "keyword_research_download_log.csv"
     second_pass_path = log_dir / "keyword_research_html_second_pass.csv"
-    dedup_dir = work_path(run_root, "downloaded_pdfs_deduplicated", "deduplicated")
-    final_pdf_dir = run_root / "final_pdfs"
+    dedup_dir = run_root / "downloaded_pdfs_deduplicated"
     manifest_path = run_root / "keyword_research_dedup_manifest.csv"
 
     pdf_dir.mkdir(parents=True, exist_ok=True)
-    non_pdf_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     dedup_dir.mkdir(parents=True, exist_ok=True)
-    final_pdf_dir.mkdir(parents=True, exist_ok=True)
 
-    candidate_df = safe_read_csv(candidate_path)
-    for column in ["record_id", "exclusion_reason_if_any"]:
-        if column not in candidate_df.columns:
-            candidate_df[column] = pd.Series(dtype="object")
-    log_df = safe_read_csv(log_path)
-    success_ids = set(log_df.loc[log_df.get("download_status", pd.Series(dtype=str)).isin(["success", "fulltext_only"]), "record_id"].astype(str)) if not log_df.empty else set()
-    processed_ids = set(log_df.get("record_id", pd.Series(dtype=str)).astype(str)) if not log_df.empty else set()
+    candidate_df = pd.read_csv(candidate_path)
+    log_df = _safe_read_csv(log_path)
+    success_ids: set[str] = set()
+    processed_ids: set[str] = set()
+    if not log_df.empty and "record_id" in log_df.columns:
+        if "download_status" in log_df.columns:
+            success_ids = set(log_df.loc[log_df["download_status"].eq("success"), "record_id"].astype(str))
+        processed_ids = set(log_df["record_id"].astype(str))
 
     if args.retry_failed:
         target = candidate_df.loc[candidate_df["exclusion_reason_if_any"].fillna("").eq("") & ~candidate_df["record_id"].astype(str).isin(success_ids)].copy()
     else:
         target = candidate_df.loc[candidate_df["exclusion_reason_if_any"].fillna("").eq("") & ~candidate_df["record_id"].astype(str).isin(processed_ids)].copy()
 
+    # Initialize institutional resolver if enabled
+    _resolver = None
+    if args.institutional:
+        try:
+            from literature_harvest.institutional_resolver import InstitutionalResolver  # noqa: WPS433
+            _resolver = InstitutionalResolver(timeout=args.timeout, delay=args.publisher_delay)
+        except ImportError:
+            print("Warning: literature_harvest package not found; institutional resolver disabled")
+
     rows: list[dict[str, Any]] = []
     for idx, (_, row) in enumerate(target.iterrows(), start=1):
-        raise_if_cancelled(run_root)
-        rows.append(request_row_download(row, pdf_dir, non_pdf_dir, args.timeout, args.max_attempts))
+        rows.append(request_row_download(row, pdf_dir, args.timeout, args.max_attempts,
+                                          institutional_resolver=_resolver))
         if idx % 50 == 0:
             chunk = pd.DataFrame(rows)
-            existing_log = safe_read_csv(log_path)
-            if not existing_log.empty:
-                out = pd.concat([existing_log, chunk], ignore_index=True)
+            if log_path.exists():
+                out = pd.concat([_safe_read_csv(log_path), chunk], ignore_index=True)
             else:
                 out = chunk
             out = out.drop_duplicates(subset=["record_id"], keep="last")
             out.to_csv(log_path, index=False, encoding="utf-8-sig")
             rows = []
     if rows:
-        existing_log = safe_read_csv(log_path)
-        if not existing_log.empty:
-            out = pd.concat([existing_log, pd.DataFrame(rows)], ignore_index=True)
+        if log_path.exists():
+            out = pd.concat([_safe_read_csv(log_path), pd.DataFrame(rows)], ignore_index=True)
         else:
             out = pd.DataFrame(rows)
         out = out.drop_duplicates(subset=["record_id"], keep="last")
@@ -379,17 +340,13 @@ def main() -> None:
 
     # HTML second pass
     second_rows: list[dict[str, Any]] = []
-    html_files = [p for folder in [pdf_dir, non_pdf_dir] for p in folder.iterdir() if p.is_file() and p.suffix.lower() in {".html", ".htm"}]
-    second_pass_df = safe_read_csv(second_pass_path)
-    if {"record_id", "second_pass_status"}.issubset(second_pass_df.columns):
-        done_second = set(
-            second_pass_df.loc[second_pass_df["second_pass_status"].astype(str).eq("pdf_downloaded"), "record_id"].astype(str)
-        )
-    else:
-        done_second = set()
+    html_files = [p for p in pdf_dir.iterdir() if p.is_file() and p.suffix.lower() in {".html", ".htm"}]
+    done_second: set[str] = set()
+    df_second = _safe_read_csv(second_pass_path)
+    if not df_second.empty and "record_id" in df_second.columns:
+        done_second = set(df_second["record_id"].astype(str))
     meta = candidate_df.set_index("record_id", drop=False)
     for idx, path in enumerate(html_files, start=1):
-        raise_if_cancelled(run_root)
         record_id = path.stem.split("_")[0]
         if record_id in done_second:
             continue
@@ -403,7 +360,7 @@ def main() -> None:
             try:
                 response = request_url(link, args.timeout)
                 if classify_payload(response["payload"], response["content_type"]) == "pdf":
-                    dst = pdf_dir / short_download_filename(record_id, "secondary", ".pdf")
+                    dst = pdf_dir / f"{path.stem}_secondary.pdf"
                     dst.write_bytes(response["payload"])
                     status = "pdf_downloaded"
                     out_path = str(dst)
@@ -424,48 +381,28 @@ def main() -> None:
         )
         if idx % 50 == 0:
             chunk = pd.DataFrame(second_rows)
-            existing_second = safe_read_csv(second_pass_path)
-            if not existing_second.empty:
-                out = pd.concat([existing_second, chunk], ignore_index=True)
+            if second_pass_path.exists():
+                out = pd.concat([_safe_read_csv(second_pass_path), chunk], ignore_index=True)
             else:
                 out = chunk
             out = out.drop_duplicates(subset=["record_id"], keep="last")
             out.to_csv(second_pass_path, index=False, encoding="utf-8-sig")
             second_rows = []
     if second_rows:
-        existing_second = safe_read_csv(second_pass_path)
-        if not existing_second.empty:
-            out = pd.concat([existing_second, pd.DataFrame(second_rows)], ignore_index=True)
+        if second_pass_path.exists():
+            out = pd.concat([_safe_read_csv(second_pass_path), pd.DataFrame(second_rows)], ignore_index=True)
         else:
             out = pd.DataFrame(second_rows)
         out = out.drop_duplicates(subset=["record_id"], keep="last")
         out.to_csv(second_pass_path, index=False, encoding="utf-8-sig")
 
-    second_pass_df = safe_read_csv(second_pass_path)
-    log_df = safe_read_csv(log_path)
-    if not second_pass_df.empty and not log_df.empty:
-        for _, row in second_pass_df.loc[second_pass_df.get("second_pass_status", pd.Series(dtype=str)).eq("pdf_downloaded")].iterrows():
-            record_id = clean_text(row.get("record_id"))
-            if not record_id:
-                continue
-            mask = log_df["record_id"].astype(str).eq(record_id)
-            log_df.loc[mask, "final_pdf_path"] = clean_text(row.get("secondary_pdf_path"))
-            log_df.loc[mask, "final_pdf_url"] = clean_text(row.get("selected_pdf_url"))
-            log_df.loc[mask, "download_status"] = "success"
-            log_df.loc[mask, "failure_reason"] = ""
-            log_df.loc[mask, "content_format"] = "pdf"
-        log_df.to_csv(log_path, index=False, encoding="utf-8-sig")
-
     # Dedup
     file_rows: list[dict[str, Any]] = []
     meta = candidate_df.set_index("record_id", drop=False)
     for path in pdf_dir.iterdir():
-        raise_if_cancelled(run_root)
         if not path.is_file():
             continue
-        if path.suffix.lower() != ".pdf":
-            continue
-        record_id = path.stem.split("_")[0]
+        record_id = path.name.split("_")[0]
         row = meta.loc[record_id] if record_id in meta.index else pd.Series({})
         file_rows.append(
             {
@@ -479,12 +416,9 @@ def main() -> None:
             }
         )
     manifest = pd.DataFrame(file_rows)
-    final_rows: list[dict[str, Any]] = []
     if not manifest.empty:
-        manifest["final_pdf_path"] = ""
         keep_by_group: dict[str, str] = {}
         for _, row in manifest.iterrows():
-            raise_if_cancelled(run_root)
             key = f"doi:{row['doi']}" if row["doi"] else (f"title:{row['title_normalized']}" if row["title_normalized"] else f"hash:{row['sha256']}")
             current = keep_by_group.get(key)
             if current is None:
@@ -502,15 +436,8 @@ def main() -> None:
             src = Path(row["source_path"])
             dst = dedup_dir / src.name
             if not dst.exists():
-                copy_file(src, dst)
-            if src.suffix.lower() == ".pdf":
-                final_dst = final_pdf_dir / src.name
-                if not final_dst.exists():
-                    copy_file(src, final_dst)
-                manifest.loc[manifest["source_path"].eq(str(src)), "final_pdf_path"] = str(final_dst)
-                final_rows.append({"record_id": row["record_id"], "source_path": str(src), "final_pdf_path": str(final_dst), "sha256": row["sha256"]})
+                shutil.copy2(src, dst)
     manifest.to_csv(manifest_path, index=False, encoding="utf-8-sig")
-    pd.DataFrame(final_rows).to_csv(run_root / "final_pdfs_manifest.csv", index=False, encoding="utf-8-sig")
 
 
 if __name__ == "__main__":

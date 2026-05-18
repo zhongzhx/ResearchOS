@@ -5,7 +5,7 @@ import math
 
 import pandas as pd
 
-from harvest_utils import (
+from literature_harvest.scripts.harvest_utils import (
     EUROPEPMC_SEARCH_URL,
     RAW_DIR,
     clean_text,
@@ -87,14 +87,11 @@ def search_europepmc(config_path: str | None = None) -> pd.DataFrame:
         retrieved = 0
         page = 1
         first_payload = None
-        search_query = query["query"]
-        if config.get("open_access_only", True) and "OPEN_ACCESS" not in search_query.upper():
-            search_query = f"({search_query}) OPEN_ACCESS:Y"
         while retrieved < max_results:
             payload = request_json(
                 EUROPEPMC_SEARCH_URL,
                 params={
-                    "query": search_query,
+                    "query": query["query"],
                     "format": "json",
                     "resultType": "core",
                     "pageSize": page_size,
@@ -117,10 +114,10 @@ def search_europepmc(config_path: str | None = None) -> pd.DataFrame:
         if first_payload is not None:
             write_json(first_payload, RAW_DIR / f"europepmc_search_{query['name']}.json")
         logs.append(
-                {
-                    "query_name": query["name"],
-                    "search_query": search_query,
-                    "db": "europepmc",
+            {
+                "query_name": query["name"],
+                "search_query": query["query"],
+                "db": "europepmc",
                 "retrieved_row_count": retrieved,
                 "reported_hit_count": hit_count,
                 "page_count_estimate": math.ceil(min(hit_count, max_results) / page_size) if page_size else 0,

@@ -48,13 +48,13 @@ class ChatRealContractTests(unittest.TestCase):
 
     def test_renderer_hides_internal_task_handoff_but_not_explanations(self) -> None:
         hidden = render_chat_answer('{ ok: true, answer: "Research Task Handoff\\nTaskSpec: task_123\\nExecutionResult: success\\nMemory: internal" }')
-        self.assertIn("该响应来自任务执行链路，已隐藏内部交接内容。请在实验模式或任务页查看详情。", hidden)
+        self.assertIn("该内容来自内部任务执行链路，已隐藏技术细节。可在功能导航中查看任务详情。", hidden)
         self.assertNotIn("task_123", hidden)
         self.assertNotIn("ExecutionResult: success", hidden)
 
         explanation = render_chat_answer('{ ok: true, answer: "TaskSpec 是任务规格，用来描述目标、输入和成功标准。" }')
         self.assertIn("TaskSpec 是任务规格", explanation)
-        self.assertNotIn("已隐藏内部交接内容", explanation)
+        self.assertNotIn("已隐藏技术细节", explanation)
 
     def test_api_payload_contracts_and_product_demo_methods(self) -> None:
         output = run_node(
@@ -121,7 +121,7 @@ class ChatRealContractTests(unittest.TestCase):
 
     def test_default_chat_ui_does_not_call_coordinator_or_product_run(self) -> None:
         chat = read(CHAT_JS)
-        stable_block = chat.split("async function sendStableChat", 1)[1].split("async function sendExperimentalChat", 1)[0]
+        stable_block = chat.split("async function sendStableChat", 1)[1].split("async function sendCoordinatorChat", 1)[0]
         submit_block = chat.split("async function submitPrompt", 1)[1].split("async function runDemo", 1)[0]
 
         self.assertIn("sendLegacyChat(prompt", stable_block)
@@ -172,6 +172,7 @@ class ChatRealContractTests(unittest.TestCase):
                 this.elements.chatLog = new FakeElement("chatLog");
                 this.elements.chatInput = new FakeElement("chatInput");
                 this.elements.sendButton = new FakeElement("sendButton");
+                this.elements.newConversationButton = new FakeElement("newConversationButton");
                 this.elements.demoButton = new FakeElement("demoButton");
                 this.elements.experimentalModeToggle = new FakeElement("experimentalModeToggle");
               }}
@@ -197,8 +198,8 @@ class ChatRealContractTests(unittest.TestCase):
               }};
             }};
             const {{ appState }} = await import({(ROOT / "web_client" / "state.js").as_uri()!r});
-            appState.activeProjectId = "";
-            appState.activeProject = null;
+            appState.activeProjectId = "project-ui";
+            appState.activeProject = {{ id: "project-ui", display_name: "UI Project" }};
             appState.dualAgentEnabled = false;
             appState.conversationId = "";
             appState.sessionId = "";
@@ -217,9 +218,112 @@ class ChatRealContractTests(unittest.TestCase):
         self.assertTrue(result["calls"][0]["url"].endswith("/research-os/agent/chat"))
         self.assertEqual(result["calls"][0]["method"], "POST")
         self.assertEqual(result["calls"][0]["body"]["message"], "你好")
-        self.assertEqual(result["calls"][0]["body"]["project_id"], "default")
+        self.assertEqual(result["calls"][0]["body"]["project_id"], "project-ui")
         self.assertIn("你好，我是 AURA Research。", result["html"])
         self.assertNotIn("/api/agents/coordinator/run", result["calls"][0]["url"])
+
+    def test_skill_like_chat_routes_to_skill_coordinator_without_manual_toggle(self) -> None:
+        output = run_node(
+            f"""
+            globalThis.requestAnimationFrame = (callback) => callback();
+            globalThis.CustomEvent = class CustomEvent {{ constructor(name) {{ this.type = name; }} }};
+            globalThis.window = {{
+              location: {{ protocol: "http:" }},
+              dispatchEvent: () => undefined,
+            }};
+            class FakeElement {{
+              constructor(id = "") {{
+                this.id = id;
+                this.value = "";
+                this.dataset = {{}};
+                this.listeners = {{}};
+                this.scrollTop = 0;
+                this.scrollHeight = 0;
+              }}
+              addEventListener(type, listener) {{
+                this.listeners[type] = this.listeners[type] || [];
+                this.listeners[type].push(listener);
+              }}
+              focus() {{}}
+              async click() {{
+                for (const listener of this.listeners.click || []) {{
+                  await listener({{ target: this }});
+                }}
+              }}
+            }}
+            class FakeRoot {{
+              constructor() {{
+                this.elements = {{}};
+                this.html = "";
+              }}
+              set innerHTML(value) {{
+                this.html = value;
+                this.elements.chatLog = new FakeElement("chatLog");
+                this.elements.chatInput = new FakeElement("chatInput");
+                this.elements.sendButton = new FakeElement("sendButton");
+                this.elements.newConversationButton = new FakeElement("newConversationButton");
+              }}
+              get innerHTML() {{ return this.html; }}
+              querySelector(selector) {{
+                if (selector.startsWith("#")) return this.elements[selector.slice(1)];
+                return null;
+              }}
+              querySelectorAll(selector) {{ return []; }}
+            }}
+            const calls = [];
+            globalThis.fetch = async (url, options) => {{
+              calls.push({{ url, method: options.method, body: options.body ? JSON.parse(options.body) : null }});
+              if (url.endsWith("/api/skills/route")) {{
+                return {{
+                  ok: true,
+                  status: 200,
+                  text: async () => JSON.stringify({{
+                    ok: true,
+                    pipeline: {{
+                      pipeline_name: "literature_harvest",
+                      selected_skill: "core_keyword_research_harvest",
+                    }},
+                  }}),
+                }};
+              }}
+              if (url.endsWith("/api/agents/coordinator/run")) {{
+                return {{
+                  ok: true,
+                  status: 200,
+                  text: async () => JSON.stringify({{
+                    ok: true,
+                    answer: "skill coordinator called",
+                    task_spec: {{ task_type: "literature_harvest" }},
+                    execution_result: {{ status: "success" }},
+                    conversation_id: "conversation-skill",
+                    session_id: "session-skill",
+                  }}),
+                }};
+              }}
+              throw new Error(`unexpected url: ${{url}}`);
+            }};
+            const {{ appState }} = await import({(ROOT / "web_client" / "state.js").as_uri()!r});
+            appState.activeProjectId = "project-skill";
+            appState.activeProject = {{ id: "project-skill", display_name: "Skill Project" }};
+            appState.dualAgentEnabled = false;
+            appState.conversationId = "";
+            appState.sessionId = "";
+            const {{ renderChatView }} = await import({CHAT_JS.as_uri()!r});
+            const root = new FakeRoot();
+            await renderChatView({{ root }});
+            root.querySelector("#chatInput").value = "search papers about Alzheimer deep learning";
+            await root.querySelector("#sendButton").click();
+            process.stdout.write(JSON.stringify({{ calls, html: root.innerHTML }}));
+            """
+        )
+        import json
+
+        result = json.loads(output)
+        self.assertEqual(len(result["calls"]), 2)
+        self.assertTrue(result["calls"][0]["url"].endswith("/api/skills/route"))
+        self.assertTrue(result["calls"][1]["url"].endswith("/api/agents/coordinator/run"))
+        self.assertEqual(result["calls"][1]["body"]["project_id"], "project-skill")
+        self.assertNotIn("/research-os/agent/chat", "\n".join(call["url"] for call in result["calls"]))
 
     def test_api_alignment_matches_product_demo_contract(self) -> None:
         api = read(API_JS)

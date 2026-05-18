@@ -11,29 +11,30 @@ class ChatDefaultModeTests(unittest.TestCase):
         source = (ROOT / "web_client" / "views" / "chat.js").read_text(encoding="utf-8")
         submit_match = re.search(r"async function submitPrompt\(.*?\n}\n", source, re.S)
         stable_match = re.search(r"async function sendStableChat\(.*?\n}\n", source, re.S)
-        experimental_match = re.search(r"async function sendExperimentalChat\(.*?\n}\n", source, re.S)
+        coordinator_match = re.search(r"async function sendCoordinatorChat\(.*?\n}\n", source, re.S)
         self.assertIsNotNone(submit_match)
         self.assertIsNotNone(stable_match)
-        self.assertIsNotNone(experimental_match)
+        self.assertIsNotNone(coordinator_match)
         submit_source = submit_match.group(0)
         stable_source = stable_match.group(0)
-        experimental_source = experimental_match.group(0)
+        coordinator_source = coordinator_match.group(0)
 
         self.assertIn("const activeProjectId = resolveChatProjectId()", stable_source)
         self.assertIn("currentChatSessionIds(activeProjectId)", stable_source)
         self.assertIn("sendLegacyChat(prompt, activeProjectId, conversationId, sessionId)", stable_source)
-        self.assertIn("runCoordinator(prompt, activeProjectId, conversationId, sessionId)", experimental_source)
+        self.assertIn("runCoordinator(prompt, activeProjectId, conversationId, sessionId)", coordinator_source)
         self.assertIn("if (appState.dualAgentEnabled)", submit_source)
         self.assertIn("await sendStableChat(prompt)", submit_source)
         self.assertLess(submit_source.index("if (appState.dualAgentEnabled)"), submit_source.index("await sendStableChat(prompt)"))
 
     def test_dual_agent_is_explicit_experimental_mode(self) -> None:
         source = (ROOT / "web_client" / "views" / "chat.js").read_text(encoding="utf-8")
+        settings = (ROOT / "web_client" / "views" / "settings.js").read_text(encoding="utf-8")
         state_source = (ROOT / "web_client" / "state.js").read_text(encoding="utf-8")
 
-        self.assertIn("experimentalModeToggle", source)
-        self.assertIn("双 Agent 实验模式", source)
-        self.assertIn("setDualAgentEnabled", source)
+        self.assertNotIn("experimentalModeToggle", source + settings)
+        self.assertNotIn("内部协调器实验模式", settings)
+        self.assertNotIn("setDualAgentEnabled", settings)
         self.assertIn("dualAgentEnabled: false", state_source)
         self.assertNotIn("safeLocalStorageGet(DUAL_AGENT_KEY", state_source)
 
@@ -57,7 +58,7 @@ class ChatDefaultModeTests(unittest.TestCase):
         self.assertIn("回答来源", chat_answer_source)
         self.assertIn("answer_source", chat_answer_source)
         self.assertIn("llm_output_used", chat_answer_source)
-        self.assertIn("show_diagnostics", chat_answer_source)
+        self.assertIn("return false", chat_answer_source)
         self.assertNotIn('jsonDetails("Raw JSON"', chat_answer_source)
 
     def test_chat_input_is_chinese_first_and_focus_is_restored_after_rerender(self) -> None:

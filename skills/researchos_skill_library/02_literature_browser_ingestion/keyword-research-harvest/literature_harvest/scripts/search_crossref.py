@@ -4,7 +4,7 @@ import argparse
 
 import pandas as pd
 
-from harvest_utils import (
+from literature_harvest.scripts.harvest_utils import (
     CROSSREF_URL,
     RAW_DIR,
     USER_AGENT,
@@ -95,44 +95,26 @@ def search_crossref(config_path: str | None = None) -> pd.DataFrame:
     headers = {"User-Agent": f"{USER_AGENT} (mailto:{config.get('email') or 'none@example.com'})"}
 
     for query in config["queries"]:
-        retrieved = 0
-        offset = 0
-        first_payload = None
-        while retrieved < max_results:
-            params = {
+        payload = request_json(
+            CROSSREF_URL,
+            params={
                 "query.bibliographic": query["query"],
-                "rows": min(page_size, max_results - retrieved),
-                "offset": offset,
-            }
-            if config.get("open_access_only", True):
-                params["filter"] = "has-full-text:true"
-            payload = request_json(
-                CROSSREF_URL,
-                params=params,
-                headers=headers,
-                delay_seconds=delay,
-            )
-            if first_payload is None:
-                first_payload = payload
-                write_json(payload, RAW_DIR / f"crossref_search_{query['name']}.json")
-            items = payload.get("message", {}).get("items", []) or []
-            if not items:
-                break
-            for item in items:
-                rows.append(parse_crossref_item(item, query["name"], query["query"]))
-                retrieved += 1
-                if retrieved >= max_results:
-                    break
-            if len(items) < page_size:
-                break
-            offset += len(items)
+                "rows": min(max_results, page_size),
+            },
+            headers=headers,
+            delay_seconds=delay,
+        )
+        write_json(payload, RAW_DIR / f"crossref_search_{query['name']}.json")
+        items = payload.get("message", {}).get("items", []) or []
+        for item in items[:max_results]:
+            rows.append(parse_crossref_item(item, query["name"], query["query"]))
         logs.append(
             {
                 "query_name": query["name"],
                 "search_query": query["query"],
                 "db": "crossref",
-                "retrieved_row_count": retrieved,
-                "reported_total_results": clean_text((first_payload or {}).get("message", {}).get("total-results")),
+                "retrieved_row_count": min(len(items), max_results),
+                "reported_total_results": clean_text(payload.get("message", {}).get("total-results")),
             }
         )
 

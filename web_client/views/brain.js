@@ -69,7 +69,7 @@ function memoryOsRows(memoryItems, episodes, events, health, cognitiveState) {
 export async function renderBrainView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
-      <div><h1 class="page-title">研究大脑</h1><p class="page-subtitle">项目记忆、主张、决策、失败记录、实验方案、报告、关系和复核队列。</p></div>
+      <div><h1 class="page-title">研究记忆</h1><p class="page-subtitle">查看项目记忆、主张、决策、失败记录、实验方案、报告、关系和复核队列。</p></div>
     </header>
     <div class="page-scroll"><div class="grid" id="brainContent">${emptyState("正在加载研究大脑", "正在读取记忆上下文和标准记录。")}</div></div>
   </section>`;

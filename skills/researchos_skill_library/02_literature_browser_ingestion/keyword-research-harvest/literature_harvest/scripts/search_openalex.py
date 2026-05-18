@@ -4,7 +4,7 @@ import argparse
 
 import pandas as pd
 
-from harvest_utils import (
+from literature_harvest.scripts.harvest_utils import (
     OPENALEX_URL,
     RAW_DIR,
     USER_AGENT,
@@ -84,19 +84,14 @@ def search_openalex(config_path: str | None = None) -> pd.DataFrame:
         retrieved = 0
         page = 1
         first_payload = None
-        params = {
-            "search": query["query"],
-            "per-page": page_size,
-            "page": page,
-        }
-        if config.get("open_access_only", True):
-            params["filter"] = "is_oa:true"
         while retrieved < max_results:
-            params["per-page"] = min(page_size, max_results - retrieved)
-            params["page"] = page
             payload = request_json(
                 OPENALEX_URL,
-                params=params,
+                params={
+                    "search": query["query"],
+                    "per-page": min(page_size, max_results - retrieved),
+                    "page": page,
+                },
                 headers={"User-Agent": USER_AGENT},
                 delay_seconds=delay,
             )

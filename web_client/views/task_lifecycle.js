@@ -28,20 +28,20 @@ function lifecycleSections(run) {
   const plan = run?.research_task?.plan || run?.plan || {};
   const metadata = legacyMetadata(run);
   return [
-    ["Goal", fieldList([["用户问题", taskSpec.user_query || run?.user_query || run?.title], ["意图", taskSpec.intent || run?.intent], ["成功标准", taskSpec.success_criteria || run?.success_criteria]])],
-    ["Plan", fieldList([["选择流程", pipelineName(run)], ["阶段", asArray(taskSpec.stages || plan.stages).join(", ")], ["所需技能", asArray(taskSpec.required_skills || plan.required_skills).join(", ")]]) + jsonViewer(plan)],
-    ["Contract", jsonViewer(contract.allowed_tools || contract.forbidden_tools || contract.expected_outputs ? contract : {
+    ["目标", fieldList([["用户问题", taskSpec.user_query || run?.user_query || run?.title], ["意图", taskSpec.intent || run?.intent], ["成功标准", taskSpec.success_criteria || run?.success_criteria]])],
+    ["计划", fieldList([["选择流程", pipelineName(run)], ["阶段", asArray(taskSpec.stages || plan.stages).join(", ")], ["所需技能", asArray(taskSpec.required_skills || plan.required_skills).join(", ")]]) + jsonViewer(plan)],
+    ["契约", jsonViewer(contract.allowed_tools || contract.forbidden_tools || contract.expected_outputs ? contract : {
       allowed_tools: taskSpec.allowed_tools || [],
       forbidden_tools: taskSpec.forbidden_tools || [],
       expected_outputs: taskSpec.expected_outputs || [],
       validation_rules: taskSpec.validation_rules || [],
       source_requirements: taskSpec.source_requirements || [],
     })],
-    ["Execution", fieldList([["状态", execution.status || run?.status], ["技能运行 id", execution.skillrun_id || run?.skillrun_id], ["开始时间", execution.started_at || run?.started_at], ["完成时间", execution.finished_at || run?.finished_at], ["错误", asArray(execution.errors || run?.errors).join("; ") || text(run?.error, "无记录")], ["未解决项", asArray(execution.unresolved_items || run?.unresolved_items).join("; ")]])],
-    ["Artifacts", artifacts.length ? jsonViewer(artifacts) : "<p>暂无数据</p>"],
-    ["Validation", fieldList([["可返回", validation.safe_to_return], ["可入库", validation.safe_to_promote], ["问题", asArray(validation.issues).join("; ") || "无记录"]]) + jsonViewer(validation)],
-    ["Handoff", `<p>${escapeHtml(text(handoff))}</p>`],
-    ["Memory Commit", jsonViewer({
+    ["执行", fieldList([["状态", execution.status || run?.status], ["技能运行 id", execution.skillrun_id || run?.skillrun_id], ["开始时间", execution.started_at || run?.started_at], ["完成时间", execution.finished_at || run?.finished_at], ["错误", asArray(execution.errors || run?.errors).join("; ") || text(run?.error, "无记录")], ["未解决项", asArray(execution.unresolved_items || run?.unresolved_items).join("; ")]])],
+    ["产物", artifacts.length ? jsonViewer(artifacts) : "<p>暂无数据</p>"],
+    ["校验", fieldList([["可返回", validation.safe_to_return], ["可入库", validation.safe_to_promote], ["问题", asArray(validation.issues).join("; ") || "无记录"]]) + jsonViewer(validation)],
+    ["交接摘要", `<p>${escapeHtml(text(handoff))}</p>`],
+    ["记忆提交", jsonViewer({
       promoted_pages: memory.promoted_pages || run?.memory_pages || [],
       claims: memory.promoted_claims || memory.claims || [],
       datasets: memory.datasets || [],
@@ -49,13 +49,13 @@ function lifecycleSections(run) {
       failures: memory.failures || [],
       pending_skill: run?.pending_skill || null,
     })],
-    ["legacy MVP metadata", jsonViewer(metadata)],
+    ["历史元数据", jsonViewer(metadata)],
   ];
 }
 
 function renderLastRun(run) {
   if (!run) {
-    return emptyState("暂无任务流程记录", "从聊天发起研究请求后，这里会显示 Goal、Plan、Contract、Execution、Artifacts、Validation、Handoff 和 Memory Commit。");
+    return emptyState("暂无任务流程记录", "从聊天发起研究请求后，这里会显示目标、计划、契约、执行、产物、校验、交接摘要和记忆提交。");
   }
   return `<div class="panel pad grid">
     <div class="badge-row">
@@ -81,16 +81,16 @@ function taskMatches(task) {
 
 function taskFilters() {
   return `<div class="form-grid">
-    <label class="field-label">status<input class="search-input" id="taskStatusFilter" value="${escapeHtml(taskStatusFilter)}" /></label>
-    <label class="field-label">task_type<input class="search-input" id="taskTypeFilter" value="${escapeHtml(taskTypeFilter)}" /></label>
-    <label class="field-label">query<input class="search-input" id="taskSearch" value="${escapeHtml(taskSearch)}" /></label>
+    <label class="field-label">状态<input class="search-input" id="taskStatusFilter" value="${escapeHtml(taskStatusFilter)}" /></label>
+    <label class="field-label">任务类型<input class="search-input" id="taskTypeFilter" value="${escapeHtml(taskTypeFilter)}" /></label>
+    <label class="field-label">关键词<input class="search-input" id="taskSearch" value="${escapeHtml(taskSearch)}" /></label>
   </div>`;
 }
 
 export async function renderTaskLifecycleView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
-      <div><h1 class="page-title">任务流程</h1><p class="page-subtitle">每个研究任务都会整理为 Goal、Plan、Contract、Execution、Artifacts、Validation、Handoff 和 Memory Commit。</p></div>
+      <div><h1 class="page-title">任务流程</h1><p class="page-subtitle">查看目标、计划、契约、执行、产物、校验、交接摘要和记忆提交。</p></div>
     </header>
     <div class="split-layout">
       <div class="panel pad"><div id="taskList">${loadingPanel("正在加载任务")}</div></div>

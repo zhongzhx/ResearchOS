@@ -35,7 +35,7 @@ function renderMarkdown(value) {
   return html;
 }
 
-const INTERNAL_TASK_NOTICE = "该响应来自任务执行链路，已隐藏内部交接内容。请在实验模式或任务页查看详情。";
+const INTERNAL_TASK_NOTICE = "该内容来自内部任务执行链路，已隐藏技术细节。可在功能导航中查看任务详情。";
 
 function firstTextValue(values) {
   for (const value of values) {
@@ -97,13 +97,13 @@ function mainAnswer(data, fallback) {
 
 function answerSourceLabel(source) {
   return {
-    llm: "llm",
+    llm: "模型回答",
     template: "模板",
     fallback: "降级",
     validator_rewrite: "校验改写",
     sanitizer_rewrite: "清理改写",
     coordinator_handoff: "协调器",
-    product_demo: "产品演示",
+    product_demo: "演示预览",
     cache: "缓存",
     error_recovery: "错误恢复",
   }[source] || text(source, "未知");
@@ -117,7 +117,7 @@ export function answerSourceBadge(data) {
 }
 
 function shouldShowChatDiagnostics(data) {
-  return Boolean(data?.show_diagnostics || data?.debug_mode || data?.developer_debug);
+  return false;
 }
 
 function answerSourceDetails(data) {
@@ -155,12 +155,13 @@ export function chatAnswerMessage(data, fallback = "AURA 暂时没有返回回�
 }
 
 export function dualAgentMessage(data) {
+  return plainMessage("assistant", INTERNAL_TASK_NOTICE);
   const execution = data?.execution_result || data?.raw_details?.ExecutionResult || {};
   const pending = data?.pending_skill || {};
   const resolver = data?.resolver_health || {};
   const memoryPages = Array.isArray(data?.memory_pages) ? data.memory_pages.length : Array.isArray(data?.memory_updates) ? data.memory_updates.length : 0;
   const artifactCount = Array.isArray(data?.artifacts) ? data.artifacts.length : 0;
-  const summary = data?.summary || data?.handoff || execution.summary || "AURA 已完成一次双 Agent 执行。";
+  const summary = data?.summary || data?.handoff || execution.summary || "AURA 已完成一次内部任务执行。";
   const skillrunId = data?.skillrun_id || execution.skillrun_id || "无";
   const executionStatus = data?.execution_status || execution.status || "未知";
   const badges = [
@@ -178,7 +179,7 @@ export function dualAgentMessage(data) {
     <div class="badge-row">${badges}</div>
   </div>`;
   const details = [
-    jsonDetails("任务计划 / TaskSpec", data?.task_spec || data?.raw_details?.TaskSpec),
+    jsonDetails("任务计划", data?.task_spec || data?.raw_details?.TaskSpec),
     jsonDetails("执行结果", data?.execution_result || data?.raw_details?.ExecutionResult),
     jsonDetails("校验报告", data?.validation_report),
     jsonDetails("入库决策", data?.promotion_decision),
@@ -186,7 +187,7 @@ export function dualAgentMessage(data) {
     jsonDetails("产物", data?.artifacts),
     jsonDetails("待处理技能", data?.pending_skill),
     jsonDetails("解析器状态", data?.resolver_health),
-    jsonDetails("原始 JSON", data),
+    jsonDetails("原始数据", data),
   ].join("");
 
   return `<article class="message assistant"><div class="message-bubble">${top}${details}</div></article>`;

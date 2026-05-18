@@ -111,7 +111,7 @@ class ApiAlignmentTests(unittest.TestCase):
         self.assertIn("async function sendStableChat", chat_js)
         self.assertIn("sendLegacyChat(prompt", chat_js)
         self.assertIn("if (appState.dualAgentEnabled)", chat_js)
-        self.assertIn("await sendExperimentalChat(prompt)", chat_js)
+        self.assertIn("await sendCoordinatorChat(prompt)", chat_js)
         stable_block = re.search(r"async function sendStableChat\(prompt\) \{(?P<body>.*?)\n\}", chat_js, re.DOTALL)
         self.assertIsNotNone(stable_block)
         self.assertNotIn("runCoordinator", stable_block.group("body"))

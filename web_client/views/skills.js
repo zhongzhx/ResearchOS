@@ -54,19 +54,19 @@ function filtered(rows) {
 
 function filterControls() {
   return `<div class="form-grid">
-    <label class="field-label">category<input class="search-input" id="categoryFilter" value="${escapeHtml(categoryFilter)}" /></label>
-    <label class="field-label">risk_level<input class="search-input" id="riskFilter" value="${escapeHtml(riskFilter)}" placeholder="low / medium / high" /></label>
-    <label class="field-label">requires_user_authorization<select class="search-input" id="authorizationFilter">
+    <label class="field-label">分类<input class="search-input" id="categoryFilter" value="${escapeHtml(categoryFilter)}" /></label>
+    <label class="field-label">风险等级<input class="search-input" id="riskFilter" value="${escapeHtml(riskFilter)}" placeholder="低 / 中 / 高" /></label>
+    <label class="field-label">需要授权<select class="search-input" id="authorizationFilter">
       <option value="">全部</option>
-      <option value="true" ${authorizationFilter === "true" ? "selected" : ""}>true</option>
-      <option value="false" ${authorizationFilter === "false" ? "selected" : ""}>false</option>
+      <option value="true" ${authorizationFilter === "true" ? "selected" : ""}>是</option>
+      <option value="false" ${authorizationFilter === "false" ? "selected" : ""}>否</option>
     </select></label>
-    <label class="field-label">allowed_auto_call<select class="search-input" id="autoCallFilter">
+    <label class="field-label">允许自动调用<select class="search-input" id="autoCallFilter">
       <option value="">全部</option>
-      <option value="true" ${autoCallFilter === "true" ? "selected" : ""}>true</option>
-      <option value="false" ${autoCallFilter === "false" ? "selected" : ""}>false</option>
+      <option value="true" ${autoCallFilter === "true" ? "selected" : ""}>是</option>
+      <option value="false" ${autoCallFilter === "false" ? "selected" : ""}>否</option>
     </select></label>
-    <label class="field-label">status<input class="search-input" id="statusFilter" value="${escapeHtml(statusFilter)}" /></label>
+    <label class="field-label">状态<input class="search-input" id="statusFilter" value="${escapeHtml(statusFilter)}" /></label>
   </div>`;
 }
 
@@ -79,16 +79,16 @@ function catalogCard(skill) {
     <h3 class="item-title">${escapeHtml(skill.display_name || skill.name || skillId || "技能")}</h3>
     <p class="item-subtitle">${escapeHtml(skill.canonical_path || skill.path || "暂无标准路径记录")}</p>
     <div class="item-meta">
-      ${badge(`skill_id: ${skillId}`)}
-      ${badge(`category: ${skill.category || "uncategorized"}`)}
-      ${badge(`risk_level: ${skill.risk_level || "unknown"}`, String(skill.risk_level || "").toLowerCase() === "high" ? "warning" : "muted")}
-      ${badge(`allowed_auto_call: ${skill.allowed_auto_call !== false}`)}
-      ${badge(`requires_user_authorization: ${Boolean(skill.requires_user_authorization)}`, skill.requires_user_authorization ? "warning" : "muted")}
+      ${badge(`技能 ID：${skillId}`)}
+      ${badge(`分类：${skill.category || "未分类"}`)}
+      ${badge(`风险等级：${skill.risk_level || "未知"}`, String(skill.risk_level || "").toLowerCase() === "high" ? "warning" : "muted")}
+      ${badge(`允许自动调用：${skill.allowed_auto_call !== false ? "是" : "否"}`)}
+      ${badge(`需要授权：${skill.requires_user_authorization ? "是" : "否"}`, skill.requires_user_authorization ? "warning" : "muted")}
       ${badge(status, isInternal || requiresAuthorization ? "warning" : "success")}
     </div>
-    ${jsonDetails("input_types", skill.input_types || [])}
-    ${jsonDetails("output_types", skill.output_types || [])}
-    ${jsonDetails("promotion_targets", skill.promotion_targets || [])}
+    ${jsonDetails("输入类型", skill.input_types || [])}
+    ${jsonDetails("输出类型", skill.output_types || [])}
+    ${jsonDetails("入库目标", skill.promotion_targets || [])}
   </article>`;
 }
 
@@ -142,12 +142,12 @@ function routeTester() {
     </div>
     <div><button class="button primary" type="button" id="routeButton">测试路由</button></div>
     ${routeResult ? `<div class="grid">
-      ${itemCard({ title: "selected pipeline", subtitle: selectedPipeline, status: "route" })}
-      ${itemCard({ title: "required skills", subtitle: JSON.stringify(requiredSkills), status: "skills" })}
-      ${itemCard({ title: "authorization needed", subtitle: String(authorizationNeeded), status: authorizationNeeded ? "需要授权" : "ok" })}
-      ${itemCard({ title: "risk flags", subtitle: JSON.stringify(riskFlags), status: riskFlags.length ? "warning" : "ok" })}
-      ${itemCard({ title: "reason", subtitle: reason || "暂无路由说明", status: "reason" })}
-      ${jsonDetails("raw JSON", routeResult)}
+      ${itemCard({ title: "已选流程", subtitle: selectedPipeline, status: "route" })}
+      ${itemCard({ title: "所需技能", subtitle: JSON.stringify(requiredSkills), status: "skills" })}
+      ${itemCard({ title: "授权要求", subtitle: authorizationNeeded ? "需要授权" : "无需授权", status: authorizationNeeded ? "需要授权" : "ok" })}
+      ${itemCard({ title: "风险标记", subtitle: JSON.stringify(riskFlags), status: riskFlags.length ? "warning" : "ok" })}
+      ${itemCard({ title: "路由说明", subtitle: reason || "暂无路由说明", status: "reason" })}
+      ${jsonDetails("原始数据", routeResult)}
     </div>` : emptyState("暂无路由测试", "输入请求后可以查看选择的流程、匹配技能和授权需求。")}
   </div>`;
 }
@@ -178,14 +178,14 @@ function resolverView(result) {
     ${itemCard({ title: "重复触发词", subtitle: JSON.stringify(result.data.duplicate_triggers || []), status: (result.data.duplicate_triggers || []).length ? "warning" : "ok" })}
     ${itemCard({ title: "不可达技能", subtitle: JSON.stringify(result.data.unreachable_skills || []), status: (result.data.unreachable_skills || []).length ? "warning" : "ok" })}
     ${itemCard({ title: "缺失标准路径", subtitle: JSON.stringify(result.data.missing_canonical_paths || []), status: (result.data.missing_canonical_paths || []).length ? "warning" : "ok" })}
-    ${jsonDetails("解析器健康原始数据", result.data, true)}
+    ${jsonDetails("解析器健康原始数据", result.data)}
   </div>`;
 }
 
 export async function renderSkillsView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
-      <div><h1 class="page-title">技能 / 流程</h1><p class="page-subtitle">目录、流程注册表、路由测试、待处理生成技能和解析器健康。</p></div>
+      <div><h1 class="page-title">技能 / 流程</h1><p class="page-subtitle">查看目录、流程注册表、路由测试、待处理生成技能和解析器健康。</p></div>
       <input class="search-input" id="skillFilter" lang="zh-CN" value="${escapeHtml(filter)}" placeholder="过滤技能或流程..." />
     </header>
     <div class="page-scroll"><div class="panel pad" id="skillsContent">${emptyState("正在加载技能", "正在读取目录、流程、待处理技能和解析器健康。")}</div></div>

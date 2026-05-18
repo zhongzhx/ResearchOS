@@ -128,7 +128,7 @@ export const sendLegacyChat = (message, projectId, conversationId = "", sessionI
   });
 };
 
-// experimental: only call when the user explicitly enables dual-agent mode.
+// Internal coordinator entry; only call after the user enables developer controls.
 export const runCoordinator = (userQuery, projectId, conversationId = "", sessionId = "") => {
   const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID);
   const safeConversationId = stableId(conversationId, stableId(sessionId, defaultChatSessionId(safeProjectId)));
@@ -142,15 +142,15 @@ export const runCoordinator = (userQuery, projectId, conversationId = "", sessio
 };
 export const runDualAgentDemo = (projectId) => apiGet(withProject("/api/demo/dual-agent", projectId));
 
-// demo_only: product feature contracts and demo previews. Real product execution is not wired from the UI.
+// Product feature contracts and previews are developer-facing until real execution is connected.
 export const getProductFeatures = () => apiGet("/api/product/features");
 export const getProductFeature = (featureId) => apiGet(`/api/product/features/${encodeURIComponent(featureId)}`);
 export const runProductFeature = (featureId, payload = {}) =>
-  notConnected(featureId, "该产品功能入口已预留，当前后端尚未接入真实执行链路；请使用 demo_only 预览。");
+  notConnected(featureId, "该产品功能入口已预留，当前后端尚未接入真实执行链路；请在功能导航中查看预览。");
 export const runProductFeatureDemo = (featureId, projectId) => apiGet(withProject(`/api/product/features/${encodeURIComponent(featureId)}/demo`, projectId));
 export const runProductDemoFlow = (projectId) => apiGet(withProject("/api/demo/product-flow", projectId));
 
-// experimental: skill catalog, pipeline registry, route tester, and generated skill review.
+// Developer console APIs for catalogs, workflow registry, route checks, and generated-skill review.
 export const getSkillCatalog = () => apiGet("/api/skills/catalog");
 export const getSkillPipelines = () => apiGet("/api/skills/pipelines");
 export const routeSkillQuery = (query, projectId) => apiPost("/api/skills/route", { user_query: query, project_id: projectId });
@@ -159,7 +159,7 @@ export const getPendingSkills = () => apiGet("/api/self-evolution/pending-skills
 export const activatePendingSkill = (skillName) => apiPost(`/api/self-evolution/skills/${encodeURIComponent(skillName)}/activate`, {});
 export const rejectPendingSkill = (skillName, reason) => apiPost(`/api/self-evolution/skills/${encodeURIComponent(skillName)}/reject`, { reason });
 
-// experimental: MemoryOS read/actions are gated by RESEARCHOS_MEMORYOS_ENABLED.
+// MemoryOS read/actions are gated by RESEARCHOS_MEMORYOS_ENABLED.
 export const getWorkingMemory = (projectId) => apiGet(withProject("/api/memory/working", projectId));
 export const getCognitiveState = (projectId) => apiGet(withProject("/api/memory/cognitive-state", projectId));
 export const refreshCognitiveState = (projectId, taskId = "") => apiPost("/api/memory/cognitive-state/refresh", { project_id: projectId, task_id: taskId });
@@ -192,8 +192,8 @@ export const createProject = (payload) => apiPost("/research-os/projects", paylo
 export const updateProject = (projectId, payload) => apiPut(`/research-os/projects/${encodeURIComponent(projectId)}`, payload);
 export const archiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/archive`, {});
 export const unarchiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/unarchive`, {});
-export const clearProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/clear`, {});
-export const purgeProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/purge`, {});
+export const clearProject = (projectId, payload = {}) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/clear`, payload);
+export const purgeProject = (projectId, payload = {}) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/purge`, payload);
 export const createTask = (payload) => apiPost("/research-os/tasks", payload);
 export const runTask = (taskId, payload = {}) => apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/run`, payload);
 export const cancelTask = (taskId, payload = {}) => apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/cancel`, payload);

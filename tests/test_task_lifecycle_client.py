@@ -16,10 +16,10 @@ class TaskLifecycleClientTests(unittest.TestCase):
     def test_full_research_task_and_legacy_mvp_metadata_sections_render(self) -> None:
         source = TASK_LIFECYCLE_JS.read_text(encoding="utf-8")
 
-        for section in ["Goal", "Plan", "Contract", "Execution", "Artifacts", "Validation", "Handoff", "Memory Commit"]:
+        for section in ["目标", "计划", "契约", "执行", "产物", "校验", "交接摘要", "记忆提交"]:
             self.assertIn(section, source)
 
-        self.assertIn("legacy MVP metadata", source)
+        self.assertIn("历史元数据", source)
         self.assertIn("metadata", source)
         self.assertNotIn("runProductFeature", source)
 

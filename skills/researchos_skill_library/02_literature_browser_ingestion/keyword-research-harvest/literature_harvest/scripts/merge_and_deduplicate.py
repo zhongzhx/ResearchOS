@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
-from harvest_utils import (
+from literature_harvest.scripts.harvest_utils import (
     MERGED_DIR,
     RAW_DIR,
     clean_text,
@@ -43,18 +42,7 @@ def load_sources() -> tuple[pd.DataFrame, list[dict]]:
                 }
             )
             continue
-        try:
-            df = pd.read_csv(path)
-        except pd.errors.EmptyDataError:
-            source_stats.append(
-                {
-                    "source_file": filename,
-                    "exists": True,
-                    "raw_rows": 0,
-                    "empty": True,
-                }
-            )
-            continue
+        df = pd.read_csv(path)
         df["source_file"] = filename
         frames.append(df)
         source_stats.append(
@@ -72,11 +60,6 @@ def load_sources() -> tuple[pd.DataFrame, list[dict]]:
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     data = df.copy()
-    def series_or_default(column: str, default: Any = "") -> pd.Series:
-        if column not in data.columns:
-            data[column] = default
-        return data[column]
-
     for column in [
         "query_name",
         "search_query",
@@ -100,11 +83,11 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if "year" not in data.columns:
         data["year"] = pd.NA
     data["year"] = pd.to_numeric(data["year"], errors="coerce").astype("Int64")
-    data["doi"] = series_or_default("doi").map(normalize_doi)
-    data["pmid"] = series_or_default("pmid").map(normalize_pmid)
-    data["pmcid"] = series_or_default("pmcid").map(normalize_pmcid)
+    data["doi"] = data.get("doi", "").map(normalize_doi)
+    data["pmid"] = data.get("pmid", "").map(normalize_pmid)
+    data["pmcid"] = data.get("pmcid", "").map(normalize_pmcid)
     data["open_access_flag"] = (
-        series_or_default("open_access_flag", False)
+        data.get("open_access_flag", False)
         .map(lambda value: str(value).strip().lower() in {"1", "true", "yes", "y"})
         .astype(bool)
     )

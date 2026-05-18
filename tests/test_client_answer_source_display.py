@@ -11,7 +11,7 @@ class ClientAnswerSourceDisplayTests(unittest.TestCase):
         chat_answer = source.split("export function dualAgentMessage", 1)[0]
 
         self.assertIn("shouldShowChatDiagnostics", chat_answer)
-        self.assertIn("show_diagnostics", chat_answer)
+        self.assertIn("return false", chat_answer)
         self.assertIn("answer_source", chat_answer)
         self.assertIn("llm_called", chat_answer)
         self.assertIn("llm_output_used", chat_answer)
@@ -25,7 +25,7 @@ class ClientAnswerSourceDisplayTests(unittest.TestCase):
         source = (ROOT / "web_client" / "components" / "message.js").read_text(encoding="utf-8")
 
         self.assertIn("Research Task Handoff", source)
-        self.assertIn("该响应来自任务执行链路，已隐藏内部交接内容。请在实验模式或任务页查看详情。", source)
+        self.assertIn("该内容来自内部任务执行链路，已隐藏技术细节。可在功能导航中查看任务详情。", source)
 
 
 if __name__ == "__main__":

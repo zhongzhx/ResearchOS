@@ -1,0 +1,23 @@
+{
+  "created_at": "2026-05-18T15:33:15",
+  "created_from_skillrun_id": "a69b3abc0d5d9501ff5741a9",
+  "inputs": [
+    "project_id",
+    "task_input"
+  ],
+  "name": "Generated Literature Harvest",
+  "outputs": [
+    "structured_outputs",
+    "sources",
+    "artifacts"
+  ],
+  "requires_human_review": true,
+  "status": "pending_review",
+  "type": "literature_harvest",
+  "validation_policy": {
+    "allow_unsourced_claims": false,
+    "mark_low_confidence": true,
+    "require_sources": true
+  },
+  "version": "0.1.0"
+}

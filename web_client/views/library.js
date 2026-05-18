@@ -132,8 +132,8 @@ function literatureTaskPanel() {
   return `<div class="panel pad grid">
     <div class="section-heading"><div><h2>文献采集任务</h2><p>创建并运行当前项目的 legacy ResearchOS 文献任务。</p></div></div>
     <div class="form-grid">
-      <label class="field-label">keywords / query<input class="search-input" id="literatureKeywords" lang="zh-CN" value="${escapeHtml(literatureKeywords)}" /></label>
-      <label class="field-label">max_results<input class="search-input" id="literatureMax" type="number" min="1" max="100" value="${escapeHtml(maxResults)}" /></label>
+      <label class="field-label">关键词 / 检索式<input class="search-input" id="literatureKeywords" lang="zh-CN" value="${escapeHtml(literatureKeywords)}" /></label>
+      <label class="field-label">最大结果数<input class="search-input" id="literatureMax" type="number" min="1" max="100" value="${escapeHtml(maxResults)}" /></label>
       <label class="check-row"><input id="literatureOaOnly" type="checkbox" ${includeOaOnly ? "checked" : ""} /> OA only</label>
       <button class="button secondary" type="button" id="createLiteratureTask">创建任务</button>
       <button class="button secondary" type="button" id="expandLiteratureQuery">扩展关键词</button>
@@ -149,8 +149,8 @@ function paperRequestPanel(requests) {
     <div class="section-heading"><div><h2>论文请求 / 手动下载队列</h2><p>只记录合规手动下载需求，不接外部下载、校园网授权或 paywall 绕过。</p></div></div>
     <div class="form-grid">
       <label class="field-label">DOI<input class="search-input" id="paperRequestDoi" value="${escapeHtml(paperRequestDoi)}" /></label>
-      <label class="field-label">title<input class="search-input" id="paperRequestTitle" value="${escapeHtml(paperRequestTitle)}" /></label>
-      <label class="field-label">reason<input class="search-input" id="paperRequestReason" value="${escapeHtml(paperRequestReason)}" /></label>
+      <label class="field-label">标题<input class="search-input" id="paperRequestTitle" value="${escapeHtml(paperRequestTitle)}" /></label>
+      <label class="field-label">原因<input class="search-input" id="paperRequestReason" value="${escapeHtml(paperRequestReason)}" /></label>
       <button class="button secondary" type="button" id="createPaperRequest">创建 paper request</button>
       <button class="button secondary" type="button" id="generatePaperRequests">从任务生成 paper requests</button>
       <button class="button secondary" type="button" id="processWatchFolder">处理 watch folder</button>
@@ -161,30 +161,30 @@ function paperRequestPanel(requests) {
 
 function kbRagPanel(kbRows, chunkRows, ragRows) {
   return `<div class="panel pad grid">
-    <div class="section-heading"><div><h2>KB / RAG</h2><p>构建当前项目知识库，并查询已入库文本块。</p></div></div>
+    <div class="section-heading"><div><h2>知识库查询</h2><p>构建当前项目知识库，并查询已入库文本块。</p></div></div>
     <div class="form-grid">
-      <button class="button secondary" type="button" id="buildKnowledgeBase">Build KB</button>
-      <label class="field-label">RAG query<input class="search-input" id="ragQuery" lang="zh-CN" value="${escapeHtml(ragQuery)}" /></label>
-      <button class="button primary" type="button" id="queryRag">Query RAG</button>
+      <button class="button secondary" type="button" id="buildKnowledgeBase">构建知识库</button>
+      <label class="field-label">检索问题<input class="search-input" id="ragQuery" lang="zh-CN" value="${escapeHtml(ragQuery)}" /></label>
+      <button class="button primary" type="button" id="queryRag">查询知识库</button>
     </div>
     ${lastRagResult ? `<div class="grid">
-      ${itemCard({ title: "answer", subtitle: lastRagResult.answer || lastRagResult.data?.answer || lastRagResult.error || "暂无回答", status: lastRagResult.status || (lastRagResult.ok === false ? "not_connected" : "ok") })}
-      ${jsonDetails("sources", lastRagResult.sources || lastRagResult.data?.sources || [])}
-      ${jsonDetails("chunks", lastRagResult.chunks || lastRagResult.data?.chunks || [])}
+      ${itemCard({ title: "回答", subtitle: lastRagResult.answer || lastRagResult.data?.answer || lastRagResult.error || "暂无回答", status: lastRagResult.status || (lastRagResult.ok === false ? "not_connected" : "ok") })}
+      ${jsonDetails("来源", lastRagResult.sources || lastRagResult.data?.sources || [])}
+      ${jsonDetails("文本块", lastRagResult.chunks || lastRagResult.data?.chunks || [])}
     </div>` : ""}
     <div class="metric-grid">
-      <div class="metric-card"><strong>${kbRows.length}</strong><span>KB entries</span></div>
-      <div class="metric-card"><strong>${chunkRows.length}</strong><span>chunks</span></div>
-      <div class="metric-card"><strong>${ragRows.length}</strong><span>query history</span></div>
+      <div class="metric-card"><strong>${kbRows.length}</strong><span>知识库条目</span></div>
+      <div class="metric-card"><strong>${chunkRows.length}</strong><span>文本块</span></div>
+      <div class="metric-card"><strong>${ragRows.length}</strong><span>查询历史</span></div>
     </div>
-    ${ragRows.length ? jsonDetails("query history", ragRows) : ""}
+    ${ragRows.length ? jsonDetails("查询历史", ragRows) : ""}
   </div>`;
 }
 
 export async function renderLibraryView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
-      <div><h1 class="page-title">文献库 / 证据</h1><p class="page-subtitle">引用、文本块、知识库条目、RAG 查询、文献任务、论文请求、文件和未匹配 PDF。</p></div>
+      <div><h1 class="page-title">文献库 / 证据</h1><p class="page-subtitle">查看引用、文本块、知识库条目、RAG 查询、文献任务、论文请求、文件和未匹配 PDF。</p></div>
       <input class="search-input" id="librarySearch" lang="zh-CN" value="${escapeHtml(search)}" placeholder="搜索标题、DOI、来源或状态..." />
     </header>
     <div class="page-scroll">
@@ -296,11 +296,11 @@ export async function renderLibraryView({ root }) {
   });
   root.querySelector("#buildKnowledgeBase").addEventListener("click", async () => {
     syncInputs();
-    await runLibraryAction(root, "Build KB", () => buildKnowledgeBase({ project_id: currentProjectId() }));
+    await runLibraryAction(root, "构建知识库", () => buildKnowledgeBase({ project_id: currentProjectId() }));
   });
   root.querySelector("#queryRag").addEventListener("click", async () => {
     syncInputs();
-    await runLibraryAction(root, "Query RAG", async () => {
+    await runLibraryAction(root, "查询知识库", async () => {
       const result = await queryResearchOsRag({ project_id: currentProjectId(), query: ragQuery });
       lastRagResult = result.data || { ok: false, status: result.status, error: result.error };
       return result;

@@ -45,12 +45,12 @@ class ClientSkillsConsoleTests(unittest.TestCase):
         catalog = json.loads(CATALOG.read_text(encoding="utf-8-sig"))
         skill_ids = {str(item.get("skill_id") or "") for item in catalog.get("skills", [])}
 
-        self.assertIn("selected pipeline", source)
-        self.assertIn("required skills", source)
-        self.assertIn("authorization needed", source)
-        self.assertIn("risk flags", source)
-        self.assertIn("reason", source)
-        self.assertIn("raw JSON", source)
+        self.assertIn("已选流程", source)
+        self.assertIn("所需技能", source)
+        self.assertIn("授权要求", source)
+        self.assertIn("风险标记", source)
+        self.assertIn("路由说明", source)
+        self.assertIn("原始数据", source)
         self.assertNotIn("research-agent-runtime", skill_ids)
 
 
