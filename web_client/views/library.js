@@ -34,6 +34,7 @@ let ragQuery = "";
 let actionStatus = null;
 let lastLiteratureResult = null;
 let lastRagResult = null;
+let libraryRefreshSeq = 0;
 const tabs = ["引用", "文本块", "知识库条目", "RAG 查询", "文献任务", "论文请求", "文件", "未匹配 PDF"];
 
 function tabButtons() {
@@ -93,7 +94,7 @@ async function runLibraryAction(root, label, action) {
     error: result.error || "",
   };
   window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
-  await renderLibraryView({ root });
+  await refreshLibraryContent(root);
 }
 
 function renderRows(rows, emptyLabel) {
@@ -181,19 +182,15 @@ function kbRagPanel(kbRows, chunkRows, ragRows) {
   </div>`;
 }
 
-export async function renderLibraryView({ root }) {
-  root.innerHTML = `<section class="page">
-    <header class="page-header">
-      <div><h1 class="page-title">文献库 / 证据</h1><p class="page-subtitle">查看引用、文本块、知识库条目、RAG 查询、文献任务、论文请求、文件和未匹配 PDF。</p></div>
-      <input class="search-input" id="librarySearch" lang="zh-CN" value="${escapeHtml(search)}" placeholder="搜索标题、DOI、来源或状态..." />
-    </header>
-    <div class="page-scroll">
-      ${statusBlock()}
-      <div id="libraryWorkbench">${emptyState("正在加载文献工作台", "正在读取项目证据记录。")}</div>
-      <div class="panel pad" id="libraryContent">${emptyState("正在加载文献库", "正在读取项目证据记录。")}</div>
-    </div>
-  </section>`;
-
+async function refreshLibraryContent(root) {
+  const refreshId = ++libraryRefreshSeq;
+  const workbench = root.querySelector("#libraryWorkbench");
+  const content = root.querySelector("#libraryContent");
+  const status = root.querySelector("#libraryActionStatus");
+  if (!workbench || !content) return;
+  if (status) status.outerHTML = statusBlock();
+  workbench.innerHTML = emptyState("正在加载文献工作台", "正在读取项目证据记录。");
+  content.innerHTML = emptyState("正在加载文献库", "正在读取项目证据记录。");
   const [references, chunks, kb, rag, tasks, requests, files, unmatched] = await Promise.all([
     getReferences(currentProjectId(), search),
     getReferenceChunks(currentProjectId()),
@@ -204,6 +201,7 @@ export async function renderLibraryView({ root }) {
     getFiles(currentProjectId()),
     getUnmatchedPdfs(currentProjectId()),
   ]);
+  if (refreshId !== libraryRefreshSeq) return;
   const data = {
     引用: firstArray(references.data, ["references"]),
     文本块: firstArray(chunks.data, ["reference_chunks", "chunks"]),
@@ -216,25 +214,24 @@ export async function renderLibraryView({ root }) {
   };
   const resultByTab = { 引用: references, 文本块: chunks, 知识库条目: kb, "RAG 查询": rag, 文献任务: tasks, 论文请求: requests, 文件: files, "未匹配 PDF": unmatched };
   const result = resultByTab[activeTab];
-  root.querySelector("#libraryWorkbench").innerHTML = `
+  workbench.innerHTML = `
     ${literatureTaskPanel()}
     ${paperRequestPanel(data.论文请求)}
     ${kbRagPanel(data.知识库条目, data.文本块, data["RAG 查询"])}
   `;
-  root.querySelector("#libraryContent").innerHTML = `
+  content.innerHTML = `
     ${tabButtons()}
     ${result.ok ? renderRows(data[activeTab] || [], `暂无${activeTab}`) : apiErrorCard(result, `${activeTab}接口不可用`)}
     ${jsonDetails("文献库原始数据", Object.fromEntries(Object.entries(resultByTab).map(([key, value]) => [key, value.data])))}
   `;
+  bindLibraryContentEvents(root);
+}
 
-  root.querySelector("#librarySearch").addEventListener("input", (event) => {
-    search = event.target.value;
-    renderLibraryView({ root });
-  });
+function bindLibraryContentEvents(root) {
   root.querySelectorAll("[data-library-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       activeTab = button.dataset.libraryTab;
-      renderLibraryView({ root });
+      refreshLibraryContent(root);
     });
   });
 
@@ -305,5 +302,25 @@ export async function renderLibraryView({ root }) {
       lastRagResult = result.data || { ok: false, status: result.status, error: result.error };
       return result;
     });
+  });
+}
+
+export async function renderLibraryView({ root }) {
+  root.innerHTML = `<section class="page">
+    <header class="page-header">
+      <div><h1 class="page-title">文献库 / 证据</h1><p class="page-subtitle">查看引用、文本块、知识库条目、RAG 查询、文献任务、论文请求、文件和未匹配 PDF。</p></div>
+      <input class="search-input" id="librarySearch" lang="zh-CN" value="${escapeHtml(search)}" placeholder="搜索标题、DOI、来源或状态..." />
+    </header>
+    <div class="page-scroll">
+      ${statusBlock()}
+      <div id="libraryWorkbench">${emptyState("正在加载文献工作台", "正在读取项目证据记录。")}</div>
+      <div class="panel pad" id="libraryContent">${emptyState("正在加载文献库", "正在读取项目证据记录。")}</div>
+    </div>
+  </section>`;
+
+  await refreshLibraryContent(root);
+  root.querySelector("#librarySearch").addEventListener("input", (event) => {
+    search = event.target.value;
+    refreshLibraryContent(root);
   });
 }

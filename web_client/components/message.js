@@ -1,6 +1,7 @@
 import { badge, escapeHtml, text } from "./cards.js";
 import { detailsBlock, fieldList } from "./details.js";
 import { jsonDetails } from "./json_viewer.js";
+import { appState } from "../state.js";
 
 function pipelineName(data) {
   return (
@@ -25,14 +26,149 @@ export function plainMessage(role, body) {
   return `<article class="message ${escapeHtml(role)}"><div class="message-bubble">${escapeHtml(body)}</div></article>`;
 }
 
-function renderMarkdown(value) {
+function boolText(value) {
+  return value ? "是" : "否";
+}
+
+function confirmationRows(workflow) {
+  const params = workflow?.params || {};
+  if (workflow?.intent === "literature_harvest_and_kb") {
+    return [
+      ["主题", params.query || params.topic || "待补充"],
+      ["下载数量", `${params.max_papers || 20} 篇`],
+      ["仅开放获取文献", boolText(params.oa_only !== false)],
+      ["构建知识库", boolText(params.build_kb !== false)],
+      ["非开放获取文献", "加入手动下载队列"],
+    ];
+  }
+  if (workflow?.intent === "experiment_design") {
+    return [
+      ["研究目标", params.research_goal || "待补充"],
+      ["模型", params.model || "可稍后补充"],
+      ["样品 / 干预物", params.sample || params.intervention || "可稍后补充"],
+    ];
+  }
+  if (workflow?.intent === "data_analysis") {
+    return [
+      ["数据文件", params.file_id || params.uploaded_file || "待补充"],
+      ["分析目标", params.analysis_goal || "待补充"],
+    ];
+  }
+  return Object.entries(params).map(([key, value]) => [key, value]);
+}
+
+function technicalDetails(data) {
+  if (!appState.developerMode || !data) return "";
+  return `<details class="details"><summary>技术详情</summary><pre class="json-view">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+}
+
+export function workflowConfirmationMessage(workflow) {
+  const rows = confirmationRows(workflow)
+    .map(([label, value]) => `<li><strong>${escapeHtml(label)}：</strong>${escapeHtml(value)}</li>`)
+    .join("");
+  const title = workflow?.title || "科研任务";
+  const intro =
+    workflow?.intent === "literature_harvest_and_kb"
+      ? "我可以帮你围绕当前对话主题检索文献，并构建当前项目知识库。请确认以下设置："
+      : `我可以开始“${title}”。请确认以下设置：`;
+  return `<article class="message assistant"><div class="message-bubble">
+    <div class="assistant-summary workflow-confirmation-card">
+      <p>${escapeHtml(intro)}</p>
+      <ul>${rows}</ul>
+      <div class="inline-actions">
+        <button class="button primary small" type="button" data-workflow-reply="开始">开始</button>
+        <button class="button secondary small" type="button" data-workflow-edit>修改设置</button>
+        <button class="button ghost small" type="button" data-workflow-reply="取消">取消</button>
+      </div>
+    </div>
+    ${technicalDetails(workflow?.technical)}
+  </div></article>`;
+}
+
+export function workflowResultMessage(result) {
+  const steps = Array.isArray(result?.steps) ? result.steps : [];
+  const links = Array.isArray(result?.links) ? result.links : [];
+  const stepItems = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+  const linkItems = links.map((link) => `<li>${escapeHtml(link.label || link.title || link.href || link)}</li>`).join("");
+  const manual = Number(result?.manual_queue_count || 0);
+  const manualText = manual > 0 ? `<p>有 ${manual} 篇需要手动下载。</p>` : "";
+  return `<article class="message assistant"><div class="message-bubble">
+    <div class="assistant-summary workflow-result-card">
+      <p><strong>${escapeHtml(result?.title || "任务状态")}</strong></p>
+      <p>${escapeHtml(result?.message || "当前只能生成执行计划，真实执行入口尚未接入。")}</p>
+      ${steps.length ? `<p>当前步骤：</p><ul>${stepItems}</ul>` : ""}
+      ${manualText}
+      ${result?.next_step ? `<p>下一步建议：${escapeHtml(result.next_step)}</p>` : ""}
+      ${links.length ? `<p>相关资料或任务：</p><ul>${linkItems}</ul>` : ""}
+    </div>
+    ${technicalDetails(result?.technical)}
+  </div></article>`;
+}
+
+function renderInlineMarkdown(value) {
   let html = escapeHtml(value);
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  html = html.replace(/\n{2,}/g, "</p><p>");
-  html = html.replace(/\n/g, "<br>");
   return html;
+}
+
+function renderMarkdown(value) {
+  const lines = String(value || "").split(/\r?\n/);
+  const blocks = [];
+  let paragraph = [];
+  let listType = "";
+
+  const closeParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push(`<p>${paragraph.join("<br>")}</p>`);
+    paragraph = [];
+  };
+  const closeList = () => {
+    if (!listType) return;
+    blocks.push(`</${listType}>`);
+    listType = "";
+  };
+  const openList = (type) => {
+    closeParagraph();
+    if (listType === type) return;
+    closeList();
+    listType = type;
+    blocks.push(`<${type}>`);
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      closeParagraph();
+      closeList();
+      return;
+    }
+    const heading = trimmed.match(/^#{2,3}\s+(.+)$/);
+    if (heading) {
+      closeParagraph();
+      closeList();
+      blocks.push(`<h3>${renderInlineMarkdown(heading[1])}</h3>`);
+      return;
+    }
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+    if (unordered) {
+      openList("ul");
+      blocks.push(`<li>${renderInlineMarkdown(unordered[1])}</li>`);
+      return;
+    }
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (ordered) {
+      openList("ol");
+      blocks.push(`<li>${renderInlineMarkdown(ordered[1])}</li>`);
+      return;
+    }
+    closeList();
+    paragraph.push(renderInlineMarkdown(trimmed));
+  });
+  closeParagraph();
+  closeList();
+  return blocks.join("");
 }
 
 const INTERNAL_TASK_NOTICE = "该内容来自内部任务执行链路，已隐藏技术细节。可在功能导航中查看任务详情。";
@@ -149,7 +285,7 @@ export function chatAnswerMessage(data, fallback = "AURA 暂时没有返回回�
   const badges = sourceBadge ? `<div class="badge-row">${sourceBadge}</div>` : "";
   const details = showDiagnostics ? [answerSourceDetails(data), taskStatusDetails(data)].join("") : "";
   return `<article class="message assistant"><div class="message-bubble">
-    <div class="assistant-summary"><p>${renderMarkdown(answer)}</p>${badges}</div>
+    <div class="assistant-summary">${renderMarkdown(answer)}${badges}</div>
     ${details}
   </div></article>`;
 }

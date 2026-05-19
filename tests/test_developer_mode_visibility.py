@@ -17,30 +17,40 @@ def nav_entry(source: str, view: str) -> str:
 
 
 class DeveloperModeVisibilityTests(unittest.TestCase):
-    def test_navigation_is_chinese_and_includes_all_feature_pages(self) -> None:
+    def test_navigation_is_chinese_and_gates_developer_pages(self) -> None:
         app = read(WEB_CLIENT / "app.js")
 
-        expected = {
+        normal_expected = {
             "chat": "对话",
+            "workspace": "工作台",
             "projects": "项目",
-            "library": "知识库",
-            "task_lifecycle": "任务",
-            "brain": "研究记忆",
-            "skills": "技能",
-            "runs": "运行记录",
+            "simplified_library": "资料库",
             "settings": "设置",
         }
-        for view, label in expected.items():
+        developer_expected = {
+            "library": "知识库调试",
+            "task_lifecycle": "任务调试",
+            "brain": "研究记忆",
+            "skills": "技能目录",
+            "runs": "运行记录",
+            "developer_diagnostics": "API / Resolver 诊断",
+        }
+        for view, label in normal_expected.items():
             entry = nav_entry(app, view)
             self.assertIn(f'label: "{label}"', entry)
             self.assertNotIn("developerOnly", entry)
+        for view, label in developer_expected.items():
+            entry = nav_entry(app, view)
+            self.assertIn(f'label: "{label}"', entry)
+            self.assertIn("developerOnly: true", entry)
 
-    def test_settings_has_no_developer_mode_copy_or_toggle(self) -> None:
+    def test_settings_has_developer_mode_copy_and_toggle(self) -> None:
         settings = read(WEB_CLIENT / "views" / "settings.js")
 
-        for token in ["开发者模式", "Developer Mode", "developerModeToggle", "setDeveloperMode", "experimentalModeToggle"]:
+        for token in ["开发者模式", "developerModeToggle", "setDeveloperMode"]:
             with self.subTest(token=token):
-                self.assertNotIn(token, settings)
+                self.assertIn(token, settings)
+        self.assertNotIn("experimentalModeToggle", settings)
 
     def test_internal_details_are_folded_by_default(self) -> None:
         message = read(WEB_CLIENT / "components" / "message.js")

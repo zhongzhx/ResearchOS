@@ -1,6 +1,7 @@
 const ACTIVE_PROJECT_KEY = "researchos.activeProjectId";
 const VIEW_KEY = "researchos.currentView";
 const CHAT_HISTORY_KEY = "researchos.chatHistory.v1";
+const DEVELOPER_MODE_KEY = "researchos.developerMode";
 
 function safeLocalStorageGet(key, fallback = "") {
   try {
@@ -15,6 +16,14 @@ function safeLocalStorageSet(key, value) {
     localStorage.setItem(key, value);
   } catch {
     // UI preferences are optional.
+  }
+}
+
+function safeLocalStorageBool(key, fallback = false) {
+  try {
+    return localStorage.getItem(key) === "true" || fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -69,6 +78,7 @@ export const appState = {
   activeProjectId: safeLocalStorageGet(ACTIVE_PROJECT_KEY),
   activeProject: null,
   currentView: initialCurrentView(),
+  developerMode: safeLocalStorageBool(DEVELOPER_MODE_KEY, false),
   dualAgentEnabled: false,
   health: null,
   runtimeStatus: null,
@@ -93,7 +103,7 @@ export function setProjects(projects) {
     ? projects.filter((project) => !["archived", "purged"].includes(String(project.status || "").toLowerCase()))
     : [];
   const found = appState.cachedProjects.find((project) => project.id === appState.activeProjectId || project.project_id === appState.activeProjectId);
-  appState.activeProject = found || null;
+  appState.activeProject = found || appState.cachedProjects[0] || null;
   appState.activeProjectId = appState.activeProject?.id || appState.activeProject?.project_id || "";
   if (appState.activeProjectId) safeLocalStorageSet(ACTIVE_PROJECT_KEY, appState.activeProjectId);
   switchConversationForProject(appState.activeProjectId);
@@ -110,6 +120,11 @@ export function setCurrentView(view) {
   const nextView = view || "chat";
   appState.currentView = nextView;
   safeLocalStorageSet(VIEW_KEY, appState.currentView);
+}
+
+export function setDeveloperMode(enabled) {
+  appState.developerMode = Boolean(enabled);
+  safeLocalStorageSet(DEVELOPER_MODE_KEY, appState.developerMode ? "true" : "false");
 }
 
 export function setHealth(health) {
@@ -153,9 +168,12 @@ export function lastConversationForProject(projectId) {
   return appState.lastConversationByProject[normalizeProjectId(projectId)] || "";
 }
 
-export function listConversations(projectId) {
+export function listConversations(projectId, options = {}) {
   const history = projectHistory(projectId);
-  return history ? [...history.conversations].sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || ""))) : [];
+  if (!history) return [];
+  return [...history.conversations]
+    .filter((conversation) => options.includeArchived || !conversation.archived_at)
+    .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
 }
 
 export function startNewConversation(projectId) {
@@ -206,6 +224,50 @@ export function deleteConversation(projectId, conversationId) {
   const nextConversation = listConversations(safeProjectId)[0];
   history.lastConversationId = nextConversation?.id || "";
   appState.lastConversationByProject[safeProjectId] = history.lastConversationId;
+  if (appState.conversationProjectId === safeProjectId && appState.activeConversationId === safeConversationId) {
+    if (history.lastConversationId) {
+      setConversationId(history.lastConversationId);
+      setSessionId(history.lastConversationId);
+    } else {
+      setConversationId("");
+      setSessionId("");
+      appState.activeConversationId = "";
+    }
+    setConversationProjectId(safeProjectId);
+  }
+  persistChatHistory();
+  return true;
+}
+
+export function renameConversation(projectId, conversationId, title) {
+  const safeProjectId = normalizeProjectId(projectId);
+  const safeConversationId = normalizeConversationId(conversationId);
+  const nextTitle = String(title || "").trim();
+  const history = projectHistory(safeProjectId);
+  if (!history || !safeConversationId || !nextTitle) return false;
+  const conversation = history.conversations.find((item) => item.id === safeConversationId);
+  if (!conversation) return false;
+  conversation.title = nextTitle.length > 48 ? `${nextTitle.slice(0, 48)}...` : nextTitle;
+  conversation.updated_at = nowIso();
+  persistChatHistory();
+  return true;
+}
+
+export function archiveConversation(projectId, conversationId) {
+  const safeProjectId = normalizeProjectId(projectId);
+  const safeConversationId = normalizeConversationId(conversationId);
+  const history = projectHistory(safeProjectId);
+  if (!history || !safeConversationId) return false;
+  const conversation = history.conversations.find((item) => item.id === safeConversationId);
+  if (!conversation) return false;
+  const timestamp = nowIso();
+  conversation.archived_at = timestamp;
+  conversation.updated_at = timestamp;
+  if (history.lastConversationId === safeConversationId) {
+    const nextConversation = listConversations(safeProjectId)[0];
+    history.lastConversationId = nextConversation?.id || "";
+    appState.lastConversationByProject[safeProjectId] = history.lastConversationId;
+  }
   if (appState.conversationProjectId === safeProjectId && appState.activeConversationId === safeConversationId) {
     if (history.lastConversationId) {
       setConversationId(history.lastConversationId);

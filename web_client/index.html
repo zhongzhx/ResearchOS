@@ -3,35 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AURA Research 本地工作台</title>
+    <title>AURA Research 科研工作台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <header class="top-bar">
-        <button class="brand-lockup" type="button" data-view-target="chat" aria-label="打开聊天">
-          <span class="brand-mark">A</span>
+      <aside class="sidebar" aria-label="主导航">
+        <button class="brand-lockup" type="button" data-view-target="workspace" aria-label="打开工作台">
+          <span class="brand-mark">AURA</span>
           <span class="brand-copy">
             <strong>AURA Research</strong>
           </span>
         </button>
+        <nav class="nav-list" id="mainNavigation"></nav>
+      </aside>
+
+      <header class="top-bar">
         <div id="projectSwitcher" class="project-switcher"></div>
         <div class="top-status">
-          <button class="button ghost small" type="button" data-view-target="settings">设置</button>
-        </div>
-      </header>
-
-      <div class="workspace-shell">
-        <aside class="sidebar" aria-label="主导航">
-          <nav class="nav-list" id="mainNavigation"></nav>
-          <div class="sidebar-note">
+          <div class="shell-pill shell-pill-status" aria-live="polite">
             <span class="status-dot" id="backendDot"></span>
             <span id="backendText">连接中</span>
           </div>
-        </aside>
+          <button class="button ghost small top-action" type="button" data-view-target="settings">设置</button>
+        </div>
+      </header>
 
-        <main id="viewRoot" class="view-root" tabindex="-1"></main>
-      </div>
+      <main id="viewRoot" class="view-root" tabindex="-1"></main>
     </div>
     <script type="module" src="/app.js"></script>
   </body>

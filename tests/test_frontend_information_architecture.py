@@ -17,29 +17,35 @@ def nav_entry(source: str, view: str) -> str:
 
 
 class FrontendInformationArchitectureTests(unittest.TestCase):
-    def test_project_selection_has_no_implicit_default_project(self) -> None:
+    def test_project_selection_falls_back_to_existing_project_on_startup(self) -> None:
         state = read(WEB_CLIENT / "state.js")
+        app = read(WEB_CLIENT / "app.js")
         switcher = read(WEB_CLIENT / "components" / "project_switcher.js")
         projects = read(WEB_CLIENT / "views" / "projects.js")
 
-        self.assertNotIn("appState.cachedProjects[0]", state)
+        self.assertIn("appState.cachedProjects[0]", state)
+        self.assertIn('setCurrentView("chat")', app)
         self.assertNotIn("|| projects?.[0]", switcher)
         self.assertIn('setCurrentView("chat")', projects)
         self.assertIn("startNewConversation(projectId(created))", projects)
 
-    def test_navigation_shows_all_features_without_developer_mode_gate(self) -> None:
+    def test_navigation_separates_normal_and_developer_pages(self) -> None:
         app = read(WEB_CLIENT / "app.js")
         index = read(WEB_CLIENT / "index.html")
 
         self.assertIn('id="mainNavigation"', index)
-        for view in ["chat", "projects", "library", "task_lifecycle", "brain", "skills", "runs", "settings"]:
+        for view in ["chat", "workspace", "projects", "simplified_library", "settings"]:
             with self.subTest(view=view):
                 self.assertIn(f'view: "{view}"', app)
                 self.assertNotIn("developerOnly: true", nav_entry(app, view))
-        self.assertNotIn("visibleNavItems", app)
-        self.assertNotIn("canAccessView", app)
+        for view in ["library", "task_lifecycle", "brain", "skills", "runs", "developer_diagnostics"]:
+            with self.subTest(view=view):
+                self.assertIn(f'view: "{view}"', app)
+                self.assertIn("developerOnly: true", nav_entry(app, view))
+        self.assertIn("visibleNavItems", app)
+        self.assertIn("canAccessView", app)
 
-    def test_no_developer_mode_toggle_or_shell_status_pills(self) -> None:
+    def test_developer_mode_toggle_exists_without_shell_status_pills(self) -> None:
         app = read(WEB_CLIENT / "app.js")
         state = read(WEB_CLIENT / "state.js")
         settings = read(WEB_CLIENT / "views" / "settings.js")
@@ -47,7 +53,7 @@ class FrontendInformationArchitectureTests(unittest.TestCase):
 
         for token in ["developerMode", "developerOnly", "developerModeToggle", "setDeveloperMode"]:
             with self.subTest(token=token):
-                self.assertNotIn(token, app + state + settings)
+                self.assertIn(token, app + state + settings)
         for token in ["dualAgentPill", "runtimePill", "协调器就绪", "运行时在线"]:
             with self.subTest(token=token):
                 self.assertNotIn(token, index + app)

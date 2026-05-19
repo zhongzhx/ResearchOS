@@ -241,6 +241,97 @@ export const markReferenceImportant = (referenceId, payload = {}) => apiPost(`/r
 export const excludeReference = (referenceId, payload = {}) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/exclude`, payload);
 export const linkReference = (referenceId, payload) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/link`, payload);
 export const buildKnowledgeBase = (payload) => apiPost("/research-os/knowledge-base/build", payload);
+
+function workflowPrompt(intent, params) {
+  return [
+    `请执行用户确认过的科研工作流：${intent}`,
+    ...Object.entries(params || {}).map(([key, value]) => `${key}: ${value}`),
+    "请用中文返回执行进度、成功/失败原因、下一步建议，不要展示内部技术对象。",
+  ].join("\n");
+}
+
+function workflowNotConnected(intent, detail = "真实执行入口尚未接入") {
+  return {
+    ok: false,
+    status: "not_connected",
+    intent,
+    title: "暂不能执行",
+    message: `当前只能生成执行计划，${detail}。`,
+    steps: ["已完成用户确认", "尚未连接真实执行入口"],
+    next_step: "可以先在工作台或对话中继续完善参数。",
+    technical: { intent, detail },
+  };
+}
+
+function failedWorkflowStep(intent, label, result) {
+  const status = result?.data?.status || "";
+  if (status === "not_connected" || status === "partial" || status === "demo_only") return workflowNotConnected(intent);
+  return {
+    ok: false,
+    status: "failed",
+    intent,
+    title: "任务执行失败",
+    message: `${label}没有完成：${result?.error || result?.data?.message || "后端没有返回成功状态"}`,
+    steps: [`${label}失败`],
+    next_step: "请检查项目、文件或后端服务状态后重试。",
+    technical: result?.data || result,
+  };
+}
+
+function manualQueueCount(result) {
+  const payload = result?.data || {};
+  const rows = payload.paper_requests || payload.requests || payload.manual_queue || [];
+  return Array.isArray(rows) ? rows.length : Number(payload.manual_queue_count || 0);
+}
+
+export async function executeConfirmedWorkflow(intent, params = {}, context = {}) {
+  const projectId = params.project_id || context.projectId || DEFAULT_PROJECT_ID;
+  if (intent === "literature_harvest_and_kb") {
+    const payload = {
+      project_id: projectId,
+      query: params.topic || params.query,
+      keywords: [params.topic || params.query].filter(Boolean),
+      max_results: Number(params.max_papers || 20),
+      oa_only: params.oa_only !== false,
+      non_oa_policy: params.non_oa_policy || "manual_queue",
+    };
+    const createTask = await createLiteratureSearchTask(payload);
+    if (!createTask.ok) return failedWorkflowStep(intent, "创建文献采集任务", createTask);
+    const search = await runLiteratureSearch(payload);
+    if (!search.ok) return failedWorkflowStep(intent, "检索文献", search);
+    const paperRequests = await generatePaperRequests({ project_id: projectId });
+    if (!paperRequests.ok) return failedWorkflowStep(intent, "整理手动下载队列", paperRequests);
+    let kb = null;
+    if (params.build_kb !== false) {
+      kb = await buildKnowledgeBase({ project_id: projectId });
+      if (!kb.ok) return failedWorkflowStep(intent, "构建知识库", kb);
+    }
+    return {
+      ok: true,
+      status: "success",
+      intent,
+      title: "文献采集已开始",
+      message: "已创建文献采集任务，并完成可用步骤的提交。",
+      steps: ["创建文献采集任务", "检索文献", "整理手动下载队列", params.build_kb === false ? "跳过知识库构建" : "构建知识库"],
+      manual_queue_count: manualQueueCount(paperRequests),
+      next_step: "你可以在资料库查看文献和知识条目，手动补充无法开放获取的全文。",
+      technical: { createTask: createTask.data, search: search.data, paperRequests: paperRequests.data, kb: kb?.data },
+    };
+  }
+
+  const coordinator = await runCoordinator(workflowPrompt(intent, params), projectId, context.conversationId || "", context.sessionId || "");
+  if (!coordinator.ok) return workflowNotConnected(intent);
+  return {
+    ok: true,
+    status: "success",
+    intent,
+    title: "任务已开始",
+    message: coordinator.data?.answer || coordinator.data?.message || "已把任务交给 Agent，后续结果会继续显示在对话中。",
+    steps: ["已确认参数", "已提交给 Agent"],
+    next_step: "等待 Agent 返回结果，或继续补充上下文。",
+    technical: coordinator.data,
+  };
+}
 export const queryResearchOsRag = (payload) => apiPost("/research-os/rag/query", payload);
 export const queryResearchContext = (payload) => apiPost("/research-os/research-context/query", payload);
 export const searchResearchOsMemory = (payload) => apiPost("/research-os/memory/search", payload);

@@ -44,7 +44,7 @@ class ClientLibraryActionsTests(unittest.TestCase):
         self.assertIn("libraryActionStatus", source)
         self.assertIn("not_connected", source)
         self.assertIn("async function runLibraryAction", source)
-        self.assertIn("await renderLibraryView({ root })", source)
+        self.assertIn("await refreshLibraryContent(root)", source)
         self.assertGreaterEqual(source.count("await runLibraryAction"), 8)
 
     def test_api_exposes_legacy_stable_literature_and_rag_actions(self) -> None:

@@ -222,7 +222,7 @@ class ChatRealContractTests(unittest.TestCase):
         self.assertIn("你好，我是 AURA Research。", result["html"])
         self.assertNotIn("/api/agents/coordinator/run", result["calls"][0]["url"])
 
-    def test_skill_like_chat_routes_to_skill_coordinator_without_manual_toggle(self) -> None:
+    def test_skill_like_chat_requires_confirmation_before_workflow_execution(self) -> None:
         output = run_node(
             f"""
             globalThis.requestAnimationFrame = (callback) => callback();
@@ -273,31 +273,32 @@ class ChatRealContractTests(unittest.TestCase):
             const calls = [];
             globalThis.fetch = async (url, options) => {{
               calls.push({{ url, method: options.method, body: options.body ? JSON.parse(options.body) : null }});
-              if (url.endsWith("/api/skills/route")) {{
+              if (url.endsWith("/research-os/literature/search-tasks")) {{
                 return {{
                   ok: true,
                   status: 200,
-                  text: async () => JSON.stringify({{
-                    ok: true,
-                    pipeline: {{
-                      pipeline_name: "literature_harvest",
-                      selected_skill: "core_keyword_research_harvest",
-                    }},
-                  }}),
+                  text: async () => JSON.stringify({{ ok: true, task_id: "lit-task-1" }}),
                 }};
               }}
-              if (url.endsWith("/api/agents/coordinator/run")) {{
+              if (url.endsWith("/research-os/literature/search")) {{
                 return {{
                   ok: true,
                   status: 200,
-                  text: async () => JSON.stringify({{
-                    ok: true,
-                    answer: "skill coordinator called",
-                    task_spec: {{ task_type: "literature_harvest" }},
-                    execution_result: {{ status: "success" }},
-                    conversation_id: "conversation-skill",
-                    session_id: "session-skill",
-                  }}),
+                  text: async () => JSON.stringify({{ ok: true, references: [{{ title: "paper" }}] }}),
+                }};
+              }}
+              if (url.endsWith("/research-os/literature/paper-requests/generate")) {{
+                return {{
+                  ok: true,
+                  status: 200,
+                  text: async () => JSON.stringify({{ ok: true, paper_requests: [{{ title: "manual" }}] }}),
+                }};
+              }}
+              if (url.endsWith("/research-os/knowledge-base/build")) {{
+                return {{
+                  ok: true,
+                  status: 200,
+                  text: async () => JSON.stringify({{ ok: true, entries: 1 }}),
                 }};
               }}
               throw new Error(`unexpected url: ${{url}}`);
@@ -311,18 +312,26 @@ class ChatRealContractTests(unittest.TestCase):
             const {{ renderChatView }} = await import({CHAT_JS.as_uri()!r});
             const root = new FakeRoot();
             await renderChatView({{ root }});
-            root.querySelector("#chatInput").value = "search papers about Alzheimer deep learning";
+            root.querySelector("#chatInput").value = "查一些神经炎症天然产物方向的论文";
             await root.querySelector("#sendButton").click();
-            process.stdout.write(JSON.stringify({{ calls, html: root.innerHTML }}));
+            const callsAfterPlan = calls.length;
+            const htmlAfterPlan = root.innerHTML;
+            root.querySelector("#chatInput").value = "可以";
+            await root.querySelector("#sendButton").click();
+            process.stdout.write(JSON.stringify({{ calls, html: root.innerHTML, callsAfterPlan, htmlAfterPlan }}));
             """
         )
         import json
 
         result = json.loads(output)
-        self.assertEqual(len(result["calls"]), 2)
-        self.assertTrue(result["calls"][0]["url"].endswith("/api/skills/route"))
-        self.assertTrue(result["calls"][1]["url"].endswith("/api/agents/coordinator/run"))
-        self.assertEqual(result["calls"][1]["body"]["project_id"], "project-skill")
+        self.assertEqual(result["callsAfterPlan"], 0)
+        self.assertIn("请确认以下设置", result["htmlAfterPlan"])
+        self.assertEqual(len(result["calls"]), 4)
+        self.assertTrue(result["calls"][0]["url"].endswith("/research-os/literature/search-tasks"))
+        self.assertTrue(result["calls"][1]["url"].endswith("/research-os/literature/search"))
+        self.assertTrue(result["calls"][2]["url"].endswith("/research-os/literature/paper-requests/generate"))
+        self.assertTrue(result["calls"][3]["url"].endswith("/research-os/knowledge-base/build"))
+        self.assertEqual(result["calls"][0]["body"]["project_id"], "project-skill")
         self.assertNotIn("/research-os/agent/chat", "\n".join(call["url"] for call in result["calls"]))
 
     def test_api_alignment_matches_product_demo_contract(self) -> None:

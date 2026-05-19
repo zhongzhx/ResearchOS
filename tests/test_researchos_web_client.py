@@ -10,9 +10,11 @@ ELECTRON_MAIN = ROOT / "electron" / "main.js"
 CHECK_SCRIPT = ROOT / "scripts" / "check_web_client.py"
 VIEW_FILES = [
     "chat.js",
+    "workspace.js",
     "task_lifecycle.js",
     "brain.js",
     "library.js",
+    "simplified_library.js",
     "skills.js",
     "runs.js",
     "settings.js",
@@ -47,12 +49,12 @@ class ResearchOSWebClientTests(unittest.TestCase):
             self.assertTrue((WEB_CLIENT / "components" / name).exists(), name)
         self.assertTrue(CHECK_SCRIPT.exists())
 
-    def test_shell_is_modular_conversation_first_html(self) -> None:
+    def test_shell_is_modular_workspace_first_html(self) -> None:
         html = (WEB_CLIENT / "index.html").read_text(encoding="utf-8")
 
         self.assertIn('id="viewRoot"', html)
         self.assertIn('type="module"', html)
-        self.assertIn('data-view-target="chat"', html)
+        self.assertIn('data-view-target="workspace"', html)
         self.assertNotIn("overview-grid", html)
         self.assertNotIn("dashboard-card", html)
 

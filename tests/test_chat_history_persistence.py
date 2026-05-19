@@ -48,6 +48,8 @@ class ChatHistoryPersistenceTests(unittest.TestCase):
         self.assertIn("loadChatMessages(projectId, conversationId)", source)
         self.assertIn("saveChatMessage(message)", source)
         self.assertIn("deleteConversation(projectId, conversationId)", source)
+        self.assertIn("renameConversation(projectId, conversationId, title)", source)
+        self.assertIn("archiveConversation(projectId, conversationId)", source)
 
     def test_save_and_reload_messages_by_project_and_conversation(self) -> None:
         result = run_node(
@@ -131,6 +133,39 @@ class ChatHistoryPersistenceTests(unittest.TestCase):
         self.assertEqual(result["secondMessages"], [])
         self.assertNotIn(result["second"], result["persistedProject"]["messages"])
 
+    def test_rename_and_archive_conversation_keep_history_private_to_project(self) -> None:
+        result = run_node(
+            f"""
+            const store = {{}};
+            globalThis.localStorage = {{
+              getItem: (key) => Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null,
+              setItem: (key, value) => {{ store[key] = String(value); }},
+              removeItem: (key) => {{ delete store[key]; }},
+            }};
+            const state = await import({STATE_JS.as_uri()!r});
+            const first = state.startNewConversation("project-a");
+            state.saveChatMessage({{ project_id: "project-a", conversation_id: first, role: "user", content: "alpha", created_at: "2026-01-01T00:00:00.000Z" }});
+            const second = state.startNewConversation("project-a");
+            state.renameConversation("project-a", first, "实验方案讨论");
+            const archived = state.archiveConversation("project-a", second);
+            process.stdout.write(JSON.stringify({{
+              archived,
+              visible: state.listConversations("project-a"),
+              archivedVisible: state.listConversations("project-a", {{ includeArchived: true }}),
+              firstMessages: state.loadChatMessages("project-a", first),
+              secondMessages: state.loadChatMessages("project-a", second),
+              lastA: state.lastConversationForProject("project-a"),
+            }}));
+            """
+        )
+
+        self.assertTrue(result["archived"])
+        self.assertEqual([item["id"] for item in result["visible"]], [result["firstMessages"][0]["conversation_id"]])
+        self.assertEqual(result["visible"][0]["title"], "实验方案讨论")
+        self.assertEqual(len(result["archivedVisible"]), 2)
+        self.assertEqual(result["secondMessages"], [])
+        self.assertEqual(result["lastA"], result["firstMessages"][0]["conversation_id"])
+
     def test_reopening_client_restores_project_conversation_from_local_cache(self) -> None:
         result = run_node(
             f"""
@@ -181,7 +216,20 @@ class ChatHistoryPersistenceTests(unittest.TestCase):
         self.assertIn("startNewConversation(activeProjectId)", source)
         self.assertIn("listConversations(activeProjectId)", source)
         self.assertIn("deleteConversation(activeProjectId", source)
-        self.assertIn("data-delete-conversation-id", source)
+        self.assertIn("renameConversation(activeProjectId", source)
+        self.assertIn("archiveConversation(activeProjectId", source)
+        self.assertIn("data-conversation-menu", source)
+        self.assertNotIn("data-delete-conversation-id", source)
+
+    def test_chat_view_preserves_draft_and_reloads_messages_per_active_conversation(self) -> None:
+        source = read(CHAT_JS)
+
+        self.assertIn("rememberComposerDraft(activeProjectId, previousConversationId, currentDraft)", source)
+        self.assertIn("preserveComposer = true", source)
+        self.assertIn("renderChatView({ root, focusInput: true, preserveComposer: false })", source)
+        self.assertIn("composerDraft(activeProjectId, conversationId)", source)
+        self.assertIn("loadedConversationId === conversationId", source)
+        self.assertIn("loadedProjectId === activeProjectId", source)
 
     def test_default_chat_still_uses_legacy_backend_route(self) -> None:
         chat = read(CHAT_JS)

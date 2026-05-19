@@ -55,7 +55,7 @@ class ChatStabilityTests(unittest.TestCase):
 
         self.assertIn("dualAgentEnabled: false", read(ROOT / "web_client" / "state.js"))
         self.assertNotIn("experimentalModeToggle", chat + settings)
-        self.assertNotIn("开发者模式", settings)
+        self.assertIn("开发者模式", settings)
         self.assertIn("runCoordinator(prompt, activeProjectId, conversationId, sessionId)", chat)
 
     def test_message_renderer_prefers_answer_then_content_then_message(self) -> None:
@@ -76,6 +76,14 @@ class ChatStabilityTests(unittest.TestCase):
         self.assertIn("该内容来自内部任务执行链路，已隐藏技术细节。可在功能导航中查看任务详情。", html)
         self.assertNotIn('"task_spec"', html)
         self.assertNotIn("task_123", html)
+
+    def test_markdown_experiment_sections_render_as_readable_blocks(self) -> None:
+        html = render_chat_answer('{ answer: "## 实验名称\\nRAW264.7 炎症模型\\n## 实验目的\\n验证干预物影响\\n## 实验试剂\\n- RAW264.7\\n- LPS\\n## 实验模型\\n细胞模型\\n## 实验步骤\\n1. 接种细胞\\n2. 加药处理" }')
+
+        self.assertIn('<h3>实验名称</h3>', html)
+        self.assertIn('<h3>实验目的</h3>', html)
+        self.assertIn('<li>RAW264.7</li>', html)
+        self.assertIn('<li>接种细胞</li>', html)
 
     def test_missing_project_id_shows_create_project_guide_and_api_has_safe_fallback(self) -> None:
         chat = read(CHAT_JS)

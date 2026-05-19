@@ -1,5 +1,5 @@
 import { getHealth, getLlmSettings, getResolverHealth, getRuntimeStatus, getSchedulerStatus, saveLlmSettings, testLlmSettings } from "../api.js";
-import { appState } from "../state.js";
+import { appState, setDeveloperMode } from "../state.js";
 import { apiErrorCard, badge, escapeHtml, itemCard, metricCards, text } from "../components/cards.js";
 import { emptyState } from "../components/empty_state.js";
 import { jsonDetails } from "../components/json_viewer.js";
@@ -91,6 +91,13 @@ function llmSettingsSection(settings) {
   </div>`;
 }
 
+function preferenceSection() {
+  return `<div class="grid">
+    <label class="check-row"><input id="developerModeToggle" type="checkbox" ${appState.developerMode ? "checked" : ""} /> 开发者模式</label>
+    <p class="muted">开启后会显示任务调试、研究记忆、技能目录、运行记录和 API 诊断页面。</p>
+  </div>`;
+}
+
 export async function renderSettingsView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
@@ -108,10 +115,21 @@ export async function renderSettingsView({ root }) {
   ]);
   root.querySelector("#settingsContent").innerHTML = `
     <div class="panel pad"><h2 class="item-title">LLM 服务 / API 设置</h2>${llmSettingsSection(llm)}</div>
-    <div class="panel pad"><h2 class="item-title">运行状态</h2>${runtimeSection(health, runtime, scheduler)}</div>
-    <div class="panel pad"><h2 class="item-title">内部协调器</h2>${dualAgentSection(resolver, resolver.ok)}</div>
-    <div class="panel pad"><h2 class="item-title">诊断</h2>${health.ok ? jsonDetails("运行时原始数据", { health: health.data, runtime: runtime.data, scheduler: scheduler.data }) : apiErrorCard(health, "服务不可用")}</div>
+    <div class="panel pad"><h2 class="item-title">偏好</h2>${preferenceSection()}</div>
+    ${
+      appState.developerMode
+        ? `<div class="panel pad"><h2 class="item-title">运行状态</h2>${runtimeSection(health, runtime, scheduler)}</div>
+          <div class="panel pad"><h2 class="item-title">API / Resolver 诊断</h2>${dualAgentSection(resolver, resolver.ok)}</div>
+          <div class="panel pad"><h2 class="item-title">诊断</h2>${health.ok ? jsonDetails("运行时原始数据", { health: health.data, runtime: runtime.data, scheduler: scheduler.data }) : apiErrorCard(health, "服务不可用")}</div>`
+        : ""
+    }
   `;
+
+  root.querySelector("#developerModeToggle")?.addEventListener("change", (event) => {
+    setDeveloperMode(event.target.checked);
+    window.dispatchEvent(new CustomEvent("researchos:refresh-navigation"));
+    renderSettingsView({ root });
+  });
 
   const form = root.querySelector("#llmForm");
   if (form && llm.ok) {

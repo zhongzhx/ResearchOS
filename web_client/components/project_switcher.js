@@ -8,7 +8,7 @@ function currentProjectName(projects, activeProjectId) {
 export function renderProjectSwitcher(projects, activeProjectId) {
   const hasSelectedProject = Boolean((projects || []).some((project) => (project.id || project.project_id || "") === activeProjectId));
   if (!projects?.length || !activeProjectId || !hasSelectedProject) {
-    return `<div class="project-toolbar">
+    return `<div class="project-toolbar project-toolbar-empty">
       <div class="project-empty">未选择项目</div>
       <button class="button secondary small" type="button" data-view-target="projects">新建项目</button>
     </div>`;
@@ -22,6 +22,7 @@ export function renderProjectSwitcher(projects, activeProjectId) {
     })
     .join("");
   return `<div class="project-toolbar">
+    <span class="project-current-label">当前项目</span>
     <span class="project-current" title="${escapeHtml(text(label))}">${escapeHtml(text(label))}</span>
     <label class="sr-only" for="projectSelect">项目</label>
     <select id="projectSelect" class="project-select" lang="zh-CN" data-project-select>${options}</select>
