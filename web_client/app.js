@@ -123,6 +123,15 @@ function bindShellEvents() {
   window.addEventListener("researchos:refresh-view", renderCurrentView);
   window.addEventListener("researchos:refresh-shell", refreshShell);
   window.addEventListener("researchos:refresh-navigation", renderCurrentView);
+  window.addEventListener("researchos:continue-artifact-in-chat", async (event) => {
+    setCurrentView("chat");
+    await renderCurrentView();
+    const input = document.querySelector("#chatInput");
+    if (input && event.detail?.artifactId) {
+      input.value = `请基于交付物 ${event.detail.artifactId} 继续修改：`;
+      input.focus();
+    }
+  });
 }
 
 async function boot() {

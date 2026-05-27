@@ -12,6 +12,15 @@ from typing import Any
 import pandas as pd
 
 
+PDF_DOWNLOAD_SUCCESS_STATUSES = {
+    "success",
+    "oa_pdf_downloaded",
+    "institution_pdf_downloaded",
+    "browser_pdf_downloaded",
+}
+FULLTEXT_DOWNLOAD_SUCCESS_STATUSES = PDF_DOWNLOAD_SUCCESS_STATUSES | {"html_saved", "xml_saved"}
+
+
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -401,8 +410,10 @@ def _write_structured_outputs(run_root: Path, rows: list[dict[str, Any]]) -> Non
 
 
 def write_summary(run_root: Path, candidate_df: pd.DataFrame, high_df: pd.DataFrame, medium_df: pd.DataFrame, log_df: pd.DataFrame) -> None:
-    success = int(log_df["download_status"].eq("success").sum()) if not log_df.empty else 0
-    pdf_count = int(log_df.loc[log_df["download_status"].eq("success"), "content_format"].fillna("").eq("pdf").sum()) if not log_df.empty else 0
+    success_mask = log_df["download_status"].isin(FULLTEXT_DOWNLOAD_SUCCESS_STATUSES) if not log_df.empty else pd.Series(dtype=bool)
+    pdf_mask = log_df["download_status"].isin(PDF_DOWNLOAD_SUCCESS_STATUSES) if not log_df.empty else pd.Series(dtype=bool)
+    success = int(success_mask.sum()) if not log_df.empty else 0
+    pdf_count = int(log_df.loc[pdf_mask, "content_format"].fillna("").eq("pdf").sum()) if not log_df.empty else 0
     non_pdf = success - pdf_count
     pending = int(candidate_df["download_status"].eq("pending").sum())
     lines = [
@@ -443,7 +454,9 @@ def main() -> None:
 
     skill_root = Path(__file__).resolve().parents[1]
     scripts_dir = skill_root / "literature_harvest" / "scripts"
-    sys.path.insert(0, str(scripts_dir))
+    for import_root in (skill_root, scripts_dir):
+        if str(import_root) not in sys.path:
+            sys.path.insert(0, str(import_root))
 
     from download_fulltexts import attempt_download, classify_payload, looks_paywalled  # noqa: WPS433
     from harvest_utils import ensure_directories, load_config, write_csv  # noqa: WPS433

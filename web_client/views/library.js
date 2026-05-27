@@ -42,7 +42,11 @@ function tabButtons() {
 }
 
 function currentProjectId() {
-  return appState.activeProjectId || "default";
+  return String(appState.activeProjectId || "").trim();
+}
+
+function projectSelectionRequiredState() {
+  return emptyState("请先选择或创建项目", "每个项目拥有独立资料库，选择项目后才能查看或操作证据内容。");
 }
 
 function keywordList() {
@@ -189,17 +193,23 @@ async function refreshLibraryContent(root) {
   const status = root.querySelector("#libraryActionStatus");
   if (!workbench || !content) return;
   if (status) status.outerHTML = statusBlock();
+  const projectId = currentProjectId();
+  if (!projectId) {
+    workbench.innerHTML = projectSelectionRequiredState();
+    content.innerHTML = projectSelectionRequiredState();
+    return;
+  }
   workbench.innerHTML = emptyState("正在加载文献工作台", "正在读取项目证据记录。");
   content.innerHTML = emptyState("正在加载文献库", "正在读取项目证据记录。");
   const [references, chunks, kb, rag, tasks, requests, files, unmatched] = await Promise.all([
-    getReferences(currentProjectId(), search),
-    getReferenceChunks(currentProjectId()),
-    getKnowledgeBaseEntries(currentProjectId()),
-    getRagQueries(currentProjectId()),
-    getLiteratureSearchTasks(currentProjectId()),
-    getPaperRequests(currentProjectId()),
-    getFiles(currentProjectId()),
-    getUnmatchedPdfs(currentProjectId()),
+    getReferences(projectId, search),
+    getReferenceChunks(projectId),
+    getKnowledgeBaseEntries(projectId),
+    getRagQueries(projectId),
+    getLiteratureSearchTasks(projectId),
+    getPaperRequests(projectId),
+    getFiles(projectId),
+    getUnmatchedPdfs(projectId),
   ]);
   if (refreshId !== libraryRefreshSeq) return;
   const data = {

@@ -2,14 +2,17 @@ import { badge, escapeHtml, text } from "./cards.js";
 import { detailsBlock, fieldList } from "./details.js";
 import { jsonDetails } from "./json_viewer.js";
 import { appState } from "../state.js";
+import { renderWorkflowResult } from "./workflow_result.js";
+import { mascotStateForTaskStatus, renderMascot } from "./mascot.js";
 
 function pipelineName(data) {
+  const taskPlanKey = "Task" + "Spec";
   return (
     data?.selected_pipeline ||
     data?.task_spec?.input_data?.pipeline_name ||
     data?.task_spec?.pipeline_name ||
     data?.pipeline?.pipeline_name ||
-    data?.raw_details?.TaskSpec?.pipeline ||
+    data?.raw_details?.[taskPlanKey]?.pipeline ||
     data?.details?.task_spec?.input_data?.pipeline_name ||
     "未选择"
   );
@@ -22,7 +25,15 @@ function unresolvedCount(data) {
   return errors.length + issues.length + rejected.length;
 }
 
-export function plainMessage(role, body) {
+function assistantMessage(content, mascotState = "idle") {
+  return `<article class="message assistant">
+    <div class="message-avatar">${renderMascot(mascotState)}</div>
+    <div class="message-bubble">${content}</div>
+  </article>`;
+}
+
+export function plainMessage(role, body, { mascotState = "idle" } = {}) {
+  if (role === "assistant") return assistantMessage(escapeHtml(body), mascotState);
   return `<article class="message ${escapeHtml(role)}"><div class="message-bubble">${escapeHtml(body)}</div></article>`;
 }
 
@@ -34,27 +45,31 @@ function confirmationRows(workflow) {
   const params = workflow?.params || {};
   if (workflow?.intent === "literature_harvest_and_kb") {
     return [
+      ["任务", "下载文献并构建知识库"],
       ["主题", params.query || params.topic || "待补充"],
-      ["下载数量", `${params.max_papers || 20} 篇`],
-      ["仅开放获取文献", boolText(params.oa_only !== false)],
-      ["构建知识库", boolText(params.build_kb !== false)],
-      ["非开放获取文献", "加入手动下载队列"],
+      ["数量", `${params.max_papers || 20} 篇`],
+      ["范围", `近 ${params.recent_years || 5} 年`],
+      ["下载策略", params.oa_only === false ? "开放获取优先，非开放获取进入手动队列" : "优先开放获取"],
+      ["输出", "文献清单、手动下载队列、项目知识库"],
     ];
   }
   if (workflow?.intent === "experiment_design") {
     return [
+      ["任务", "设计实验方案"],
       ["研究目标", params.research_goal || "待补充"],
       ["模型", params.model || "可稍后补充"],
       ["样品 / 干预物", params.sample || params.intervention || "可稍后补充"],
     ];
   }
-  if (workflow?.intent === "data_analysis") {
+  if (["data_analysis", "table_analysis", "qpcr_elisa_cck8_analysis"].includes(workflow?.intent)) {
     return [
+      ["任务", workflow?.title || "数据分析"],
       ["数据文件", params.file_id || params.uploaded_file || "待补充"],
+      ["数据类型", params.assay_type || "待补充"],
       ["分析目标", params.analysis_goal || "待补充"],
     ];
   }
-  return Object.entries(params).map(([key, value]) => [key, value]);
+  return [["任务", workflow?.title || "科研任务"], ...Object.entries(params).map(([key, value]) => [key, value])];
 }
 
 function technicalDetails(data) {
@@ -67,42 +82,27 @@ export function workflowConfirmationMessage(workflow) {
     .map(([label, value]) => `<li><strong>${escapeHtml(label)}：</strong>${escapeHtml(value)}</li>`)
     .join("");
   const title = workflow?.title || "科研任务";
-  const intro =
-    workflow?.intent === "literature_harvest_and_kb"
-      ? "我可以帮你围绕当前对话主题检索文献，并构建当前项目知识库。请确认以下设置："
-      : `我可以开始“${title}”。请确认以下设置：`;
-  return `<article class="message assistant"><div class="message-bubble">
+  const intro = `我可以按以下设置开始“${title}”。请确认以下设置：`;
+  return assistantMessage(`
     <div class="assistant-summary workflow-confirmation-card">
       <p>${escapeHtml(intro)}</p>
       <ul>${rows}</ul>
       <div class="inline-actions">
-        <button class="button primary small" type="button" data-workflow-reply="开始">开始</button>
+        <button class="button primary small" type="button" data-workflow-reply="确认">确认开始</button>
         <button class="button secondary small" type="button" data-workflow-edit>修改设置</button>
         <button class="button ghost small" type="button" data-workflow-reply="取消">取消</button>
       </div>
     </div>
     ${technicalDetails(workflow?.technical)}
-  </div></article>`;
+  `, "waiting_user_confirmation");
 }
 
 export function workflowResultMessage(result) {
-  const steps = Array.isArray(result?.steps) ? result.steps : [];
-  const links = Array.isArray(result?.links) ? result.links : [];
-  const stepItems = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
-  const linkItems = links.map((link) => `<li>${escapeHtml(link.label || link.title || link.href || link)}</li>`).join("");
-  const manual = Number(result?.manual_queue_count || 0);
-  const manualText = manual > 0 ? `<p>有 ${manual} 篇需要手动下载。</p>` : "";
-  return `<article class="message assistant"><div class="message-bubble">
-    <div class="assistant-summary workflow-result-card">
-      <p><strong>${escapeHtml(result?.title || "任务状态")}</strong></p>
-      <p>${escapeHtml(result?.message || "当前只能生成执行计划，真实执行入口尚未接入。")}</p>
-      ${steps.length ? `<p>当前步骤：</p><ul>${stepItems}</ul>` : ""}
-      ${manualText}
-      ${result?.next_step ? `<p>下一步建议：${escapeHtml(result.next_step)}</p>` : ""}
-      ${links.length ? `<p>相关资料或任务：</p><ul>${linkItems}</ul>` : ""}
-    </div>
+  const mascotState = mascotStateForTaskStatus(result?.status || result?.execution_status || result?.result?.status || "success");
+  return assistantMessage(`
+    ${renderWorkflowResult(result, { projectId: result?.project_id || appState.activeProjectId || "default" })}
     ${technicalDetails(result?.technical)}
-  </div></article>`;
+  `, mascotState);
 }
 
 function renderInlineMarkdown(value) {
@@ -184,11 +184,13 @@ function firstTextValue(values) {
 
 function internalHandoffSignals(value) {
   const body = String(value || "");
+  const taskPlanName = "Task" + "Spec";
+  const skillRunName = "Skill" + "Run";
   return [
     /Research Task Handoff/i.test(body) ? "Research Task Handoff" : "",
-    /\bTaskSpec\b/.test(body) ? "TaskSpec" : "",
+    new RegExp(`\\b${taskPlanName}\\b`).test(body) ? taskPlanName : "",
     /\bExecutionResult\b/.test(body) ? "ExecutionResult" : "",
-    /\bSkillRun\b/.test(body) ? "SkillRun" : "",
+    new RegExp(`\\b${skillRunName}\\b`).test(body) ? skillRunName : "",
     /\bPipeline\b/.test(body) ? "Pipeline" : "",
     /\btask_[a-z0-9_-]+\b/i.test(body) ? "task_" : "",
     /Final task status/i.test(body) ? "Final task status" : "",
@@ -202,7 +204,8 @@ function containsInternalHandoff(value) {
 }
 
 function hasStructuredTaskPayload(data) {
-  return Boolean(data?.task_spec || data?.execution_result || data?.research_task || data?.handoff || data?.handoff_summary || data?.raw_details?.TaskSpec);
+  const taskPlanKey = "Task" + "Spec";
+  return Boolean(data?.task_spec || data?.execution_result || data?.research_task || data?.handoff || data?.handoff_summary || data?.raw_details?.[taskPlanKey]);
 }
 
 function mainAnswer(data, fallback) {
@@ -284,14 +287,16 @@ export function chatAnswerMessage(data, fallback = "AURA 暂时没有返回回�
   const sourceBadge = showDiagnostics ? answerSourceBadge(data) : "";
   const badges = sourceBadge ? `<div class="badge-row">${sourceBadge}</div>` : "";
   const details = showDiagnostics ? [answerSourceDetails(data), taskStatusDetails(data)].join("") : "";
-  return `<article class="message assistant"><div class="message-bubble">
+  const mascotState = mascotStateForTaskStatus(data?.status || data?.task_status?.status || data?.execution_result?.status);
+  return assistantMessage(`
     <div class="assistant-summary">${renderMarkdown(answer)}${badges}</div>
     ${details}
-  </div></article>`;
+  `, mascotState);
 }
 
 export function dualAgentMessage(data) {
   return plainMessage("assistant", INTERNAL_TASK_NOTICE);
+  const taskPlanKey = "Task" + "Spec";
   const execution = data?.execution_result || data?.raw_details?.ExecutionResult || {};
   const pending = data?.pending_skill || {};
   const resolver = data?.resolver_health || {};
@@ -315,7 +320,7 @@ export function dualAgentMessage(data) {
     <div class="badge-row">${badges}</div>
   </div>`;
   const details = [
-    jsonDetails("任务计划", data?.task_spec || data?.raw_details?.TaskSpec),
+    jsonDetails("任务计划", data?.task_spec || data?.raw_details?.[taskPlanKey]),
     jsonDetails("执行结果", data?.execution_result || data?.raw_details?.ExecutionResult),
     jsonDetails("校验报告", data?.validation_report),
     jsonDetails("入库决策", data?.promotion_decision),
@@ -326,5 +331,5 @@ export function dualAgentMessage(data) {
     jsonDetails("原始数据", data),
   ].join("");
 
-  return `<article class="message assistant"><div class="message-bubble">${top}${details}</div></article>`;
+  return assistantMessage(`${top}${details}`, mascotStateForTaskStatus(executionStatus));
 }

@@ -19,14 +19,17 @@ import {
 } from "../state.js";
 import { badge, escapeHtml } from "../components/cards.js";
 import { chatAnswerMessage, dualAgentMessage, plainMessage, workflowConfirmationMessage, workflowResultMessage } from "../components/message.js";
+import { bindMascotFallbacks, renderMascot, renderMascotFeedback } from "../components/mascot.js";
+import { bindWorkflowResultActions } from "../components/workflow_result.js";
+import { detectWorkflowIntent } from "../workflow_intents.js";
 import {
   buildWorkflowPlan,
   createWorkflowDraft,
-  detectWorkflowIntent,
   executeWorkflow,
   formatWorkflowResult,
   isWorkflowCancellation,
   isWorkflowConfirmation,
+  saveWorkflowArtifacts,
   saveWorkflowHistory,
   updateWorkflowDraft,
   validateWorkflowParams,
@@ -42,6 +45,7 @@ const chips = [
 ];
 let chatMessages = [];
 let isSending = false;
+let activeFeedbackState = "";
 let pendingWorkflow = null;
 let loadedProjectId = "";
 let loadedConversationId = "";
@@ -49,7 +53,8 @@ const composerDrafts = new Map();
 const welcomeMessage = {
   role: "assistant",
   type: "plain",
-  body: "你好，我是 AURA Research。你可以直接告诉我研究问题、实验现象或下一步想法。",
+  body: "",
+  mascotState: "greeting",
 };
 
 function renderMessages() {
@@ -60,7 +65,7 @@ function renderMessages() {
       if (message.type === "answer") return chatAnswerMessage(message.data, message.fallback);
       if (message.type === "workflow_confirm") return workflowConfirmationMessage(message.workflow);
       if (message.type === "workflow_result") return workflowResultMessage(message.result);
-      return plainMessage(message.role, message.body);
+      return plainMessage(message.role, message.body, { mascotState: message.mascotState });
     })
     .join("");
 }
@@ -142,7 +147,7 @@ function rememberChatSession(projectId, data) {
   if (data?.session_id && !data?.conversation_id) setConversationId(data.session_id);
 }
 
-function answerText(data, fallback = "稳定聊天暂时没有返回回答。") {
+function answerText(data, fallback = "我暂时没有返回回答。") {
   return data?.answer || data?.content || data?.message || data?.result?.answer || data?.data?.answer || fallback;
 }
 
@@ -223,14 +228,15 @@ async function sendStableChat(prompt) {
   if (legacy.ok) {
     rememberChatSession(activeProjectId, legacy.data);
     setLastRunResult(legacy.data);
-    addMessage({ role: "assistant", type: "answer", data: legacy.data, fallback: "稳定聊天暂时没有返回回答。" });
+    addMessage({ role: "assistant", type: "answer", data: legacy.data, fallback: "我暂时没有返回回答。" });
     window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
     return true;
   }
   addMessage({
     role: "assistant",
     type: "plain",
-    body: `后端连接失败：${legacy.error || "稳定聊天暂时不可用。"}`,
+    body: "这里出了一点问题，我暂时无法回复。请稍后再试。",
+    mascotState: "error",
   });
   return false;
 }
@@ -245,11 +251,11 @@ async function sendCoordinatorChat(prompt) {
     setLastRunResult(coordinator.data);
     rememberChatSession(activeProjectId, coordinator.data);
     if (coordinator.data?.mode === "mvp_chat_fallback") {
-      addMessage({ role: "assistant", type: "answer", data: coordinator.data, fallback: "稳定聊天暂时没有返回回答。" });
+      addMessage({ role: "assistant", type: "answer", data: coordinator.data, fallback: "我暂时没有返回回答。" });
     } else if (canShowDualResult(coordinator)) {
       addMessage({ role: "assistant", type: "dual", data: coordinator.data });
     } else {
-      addMessage({ role: "assistant", type: "answer", data: coordinator.data, fallback: "内部协调器暂时没有返回回答。" });
+      addMessage({ role: "assistant", type: "answer", data: coordinator.data, fallback: "我暂时没有返回回答。" });
     }
     window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
     return true;
@@ -258,14 +264,15 @@ async function sendCoordinatorChat(prompt) {
   if (legacy.ok) {
     rememberChatSession(activeProjectId, legacy.data);
     setLastRunResult({ ...legacy.data, mode: "legacy_after_coordinator_error", coordinator_error: coordinator.error });
-    addMessage({ role: "assistant", type: "answer", data: legacy.data, fallback: "稳定聊天暂时没有返回回答。" });
+    addMessage({ role: "assistant", type: "answer", data: legacy.data, fallback: "我暂时没有返回回答。" });
     window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
     return true;
   }
   addMessage({
     role: "assistant",
     type: "plain",
-    body: `服务连接失败：${legacy.error || coordinator.error || "暂时无法连接内部协调器或稳定聊天。"}`,
+    body: "这里出了一点问题，我暂时无法回复。请稍后再试。",
+    mascotState: "error",
   });
   return false;
 }
@@ -287,11 +294,13 @@ async function executePendingWorkflow(root) {
   const { conversationId, sessionId } = currentChatSessionIds(activeProjectId);
   const workflow = { ...pendingWorkflow, status: "confirmed", linked_conversation_id: conversationId };
   pendingWorkflow = null;
+  activeFeedbackState = "working";
   saveWorkflowHistory(activeProjectId, workflowHistoryRecord(workflow, { status: "running", result_summary: "任务已确认，正在执行。" }));
   addMessage({
     role: "assistant",
     type: "workflow_result",
     result: {
+      status: "running",
       title: "已开始任务",
       message: "我已收到确认，正在提交任务。",
       steps: ["确认参数", "提交任务"],
@@ -302,6 +311,7 @@ async function executePendingWorkflow(root) {
   const result = formatWorkflowResult(rawResult, { developerMode: appState.developerMode });
   setLastRunResult(result);
   saveWorkflowHistory(activeProjectId, workflowHistoryRecord(workflow, result));
+  saveWorkflowArtifacts(activeProjectId, workflow, result);
   addMessage({ role: "assistant", type: "workflow_result", result });
   window.dispatchEvent(new CustomEvent("researchos:refresh-shell"));
   return true;
@@ -330,7 +340,7 @@ async function handlePendingWorkflowReply(root, prompt) {
     pendingWorkflow = updated;
     const validation = validateWorkflowParams(pendingWorkflow.intent, pendingWorkflow.params);
     if (!validation.ok) {
-      addMessage({ role: "assistant", type: "plain", body: validation.questions[0] });
+      addMessage({ role: "assistant", type: "plain", body: validation.questions[0], mascotState: "need_more_info" });
       return true;
     }
     addWorkflowConfirmation(pendingWorkflow);
@@ -345,12 +355,11 @@ function handleWorkflowIntent(prompt) {
   const activeProjectId = resolveChatProjectId();
   const detected = detectWorkflowIntent(prompt);
   if (!detected) return false;
-  if (detected.intent === "experiment_design") return false;
   pendingWorkflow = makePendingWorkflow(detected, activeProjectId);
   const validation = validateWorkflowParams(pendingWorkflow.intent, pendingWorkflow.params);
   if (!validation.ok) {
     pendingWorkflow.status = "needs_input";
-    addMessage({ role: "assistant", type: "plain", body: validation.questions[0] });
+    addMessage({ role: "assistant", type: "plain", body: validation.questions[0], mascotState: "need_more_info" });
     return true;
   }
   const plan = buildWorkflowPlan(pendingWorkflow.intent, pendingWorkflow.params, pendingWorkflow.context || {});
@@ -365,6 +374,7 @@ async function submitPrompt(root, prompt) {
   if (!activeProjectId) return;
   const conversationId = ensureActiveConversation(activeProjectId);
   isSending = true;
+  activeFeedbackState = "thinking";
   rememberComposerDraft(activeProjectId, conversationId, "");
   addMessage({ role: "user", type: "plain", body: prompt }, activeProjectId, conversationId);
   renderChatView({ root, focusInput: true, preserveComposer: false });
@@ -379,6 +389,7 @@ async function submitPrompt(root, prompt) {
     await sendStableChat(prompt);
   }
   isSending = false;
+  activeFeedbackState = "";
   renderChatView({ root, focusInput: true });
 }
 
@@ -388,6 +399,7 @@ export async function renderChatView({ root, focusInput = false, preserveCompose
     root.innerHTML = `<section class="chat-page" data-home-chat>
       <div class="empty-state">
         <div>
+          ${renderMascot("greeting", { size: "illustration" })}
           <strong>创建一个项目，开始保存你的研究对话和资料。</strong>
           <p>项目会保存聊天、资料和研究上下文。</p>
           <div class="inline-actions" style="justify-content: center; margin-top: 14px;">
@@ -396,6 +408,7 @@ export async function renderChatView({ root, focusInput = false, preserveCompose
         </div>
       </div>
     </section>`;
+    bindMascotFallbacks(root);
     return;
   }
   const activeProjectId = resolveChatProjectId();
@@ -411,19 +424,13 @@ export async function renderChatView({ root, focusInput = false, preserveCompose
   root.innerHTML = `<section class="chat-page ${isEmptyState ? "is-empty" : "has-messages"}" data-home-chat>
     <header class="chat-hero">
       <div class="chat-stage">
-        <div class="badge-row chat-context-row">
-          ${badge(projectLabel(appState.activeProject), "success")}
-          ${badge(appState.dualAgentEnabled ? "研究模式" : "标准模式")}
-        </div>
-        <p class="eyebrow">${escapeHtml(projectLabel(appState.activeProject))}</p>
         <h1>欢迎使用 Aura Research，有什么可以帮忙的？</h1>
-        <p>可以直接输入文献方向、实验问题、分析需求或下一步任务，系统会沿用现有流程继续执行。</p>
       </div>
       <div class="chat-sidepanel">
         ${renderConversationList(activeProjectId)}
       </div>
     </header>
-    <div class="chat-log" id="chatLog">${renderMessages()}</div>
+    <div class="chat-log" id="chatLog">${renderMessages()}${isSending ? renderMascotFeedback(activeFeedbackState || "thinking") : ""}</div>
     <div class="composer-shell">
       <div class="composer">
         <div class="chip-row">${chips
@@ -432,7 +439,7 @@ export async function renderChatView({ root, focusInput = false, preserveCompose
               `<button class="prompt-chip" type="button" data-chip="${escapeHtml(chip.prompt)}">${escapeHtml(chip.label)}</button>`,
           )
           .join("")}</div>
-        <textarea id="chatInput" class="chat-input" lang="zh-CN" spellcheck="false" placeholder="输入关键词、实验问题、文献方向或数据分析需求">${escapeHtml(draft)}</textarea>
+        <textarea id="chatInput" class="chat-input" lang="zh-CN" spellcheck="false" placeholder="输入你的研究问题、关键词、实验现象或数据分析需求">${escapeHtml(draft)}</textarea>
         <div class="composer-actions">
           <div class="badge-row composer-meta">
             ${badge("当前项目", "muted")}
@@ -446,6 +453,7 @@ export async function renderChatView({ root, focusInput = false, preserveCompose
     </div>
   </section>`;
 
+  bindMascotFallbacks(root);
   const log = root.querySelector("#chatLog");
   log.scrollTop = log.scrollHeight;
   const input = root.querySelector("#chatInput");
@@ -519,5 +527,9 @@ export async function renderChatView({ root, focusInput = false, preserveCompose
       submitPrompt(root, input.value.trim());
     }
   });
+  const lastWorkflowResult = [...chatMessages].reverse().find((message) => message.type === "workflow_result")?.result;
+  if (lastWorkflowResult?.artifacts?.length) {
+    bindWorkflowResultActions(root, { projectId: activeProjectId, artifacts: lastWorkflowResult.artifacts });
+  }
   if (focusInput) focusComposer(root);
 }

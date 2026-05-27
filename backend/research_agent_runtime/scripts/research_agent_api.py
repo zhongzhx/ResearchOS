@@ -2380,6 +2380,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in {"/research-os/agent/chat", "/api/llm/chat"}:
             try:
+                if os.environ.get("TEST_LLM_SENTINEL", "").strip().lower() in {"1", "true", "yes", "on"}:
+                    payload = {**payload, "_force_ordinary_llm_chat": True}
                 json_response(self, 200, research_os.agent_chat(CONFIG.agent_root, payload))
             except Exception as exc:
                 handle_error(self, exc)

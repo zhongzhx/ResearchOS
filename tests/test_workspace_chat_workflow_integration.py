@@ -15,9 +15,12 @@ class WorkspaceChatWorkflowIntegrationTests(unittest.TestCase):
     def test_workspace_and_chat_use_same_controller_for_drafts(self) -> None:
         workspace = read(WEB_CLIENT / "views" / "workspace.js")
         chat = read(WEB_CLIENT / "views" / "chat.js")
+        intents = read(WEB_CLIENT / "workflow_intents.js")
 
         self.assertIn('from "../user_workflows.js"', workspace)
         self.assertIn('from "../user_workflows.js"', chat)
+        self.assertIn('from "../workflow_intents.js"', chat)
+        self.assertIn("USER_WORKFLOW_INTENTS", intents)
         self.assertIn("createWorkflowDraft(", workspace)
         self.assertIn("createWorkflowDraft(", chat)
         self.assertIn("buildWorkflowPlan(", workspace)
@@ -61,6 +64,18 @@ class WorkspaceChatWorkflowIntegrationTests(unittest.TestCase):
 
         self.assertIn("最近工作流", workspace)
         self.assertIn("result_summary", workspace)
+
+    def test_chat_plan_only_file_and_not_ready_status_are_truthful(self) -> None:
+        chat = read(WEB_CLIENT / "views" / "chat.js")
+        controller = read(WEB_CLIENT / "user_workflows.js")
+
+        self.assertIn('current_status: "plan_only"', controller)
+        self.assertIn("我可以先生成执行计划", controller)
+        self.assertIn('current_status: "needs_file"', controller)
+        self.assertIn("请先上传文件或选择资料库文件。", controller)
+        self.assertIn('current_status: "not_ready"', controller)
+        self.assertIn("该功能正在接入中", controller)
+        self.assertIn("formatWorkflowResult", chat)
 
     def test_workspace_workflow_result_can_be_reflected_in_chat(self) -> None:
         workspace = read(WEB_CLIENT / "views" / "workspace.js")

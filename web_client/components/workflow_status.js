@@ -1,4 +1,5 @@
 import { escapeHtml } from "./cards.js";
+import { mascotStateForTaskStatus, renderMascot } from "./mascot.js";
 
 const STATUS_LABELS = {
   draft: "待确认",
@@ -6,8 +7,11 @@ const STATUS_LABELS = {
   confirmed: "待确认",
   running: "运行中",
   completed: "已完成",
-  plan_only: "已完成",
+  plan_only: "已生成计划",
   needs_input: "需要补充信息",
+  needs_file: "需要上传文件",
+  needs_authorization: "需要授权",
+  not_ready: "正在接入中",
   failed: "失败",
   cancelled: "已取消",
 };
@@ -25,10 +29,19 @@ function technicalDetails(details, developerMode) {
 }
 
 function actionButtons(status) {
-  if (status === "completed" || status === "plan_only") {
+  if (status === "completed") {
     return `<button class="button secondary small" type="button" data-workflow-action="view-result">查看结果</button>`;
   }
-  if (status === "running") return "";
+  if (status === "plan_only") {
+    return `<button class="button secondary small" type="button" data-workflow-action="modify">继续调整</button>`;
+  }
+  if (status === "needs_file") {
+    return `<button class="button secondary small" type="button" data-workflow-action="modify">选择文件</button>`;
+  }
+  if (status === "needs_authorization") {
+    return `<button class="button secondary small" type="button" data-workflow-action="modify">授权后继续</button>`;
+  }
+  if (status === "not_ready" || status === "running") return "";
   if (status === "failed" || status === "cancelled") {
     return `<button class="button secondary small" type="button" data-workflow-action="modify">修改</button>`;
   }
@@ -49,9 +62,13 @@ export function workflowStatusPanel(workflow, { developerMode = false } = {}) {
   const stepItems = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
   const resultSummary = workflow.result_summary || workflow.result?.result_summary || workflow.message || "";
   const technical = workflow.technical || workflow.result?.technical || workflow.plan?.technical;
+  const mascotState = mascotStateForTaskStatus(status);
   return `<section class="workflow-status-card notice ${status === "failed" ? "warning" : "soft"}">
     <div class="workflow-status-heading">
-      <strong>${escapeHtml(workflow.title || "科研任务")}</strong>
+      <div class="workflow-status-title">
+        ${renderMascot(mascotState, { size: "status" })}
+        <strong>${escapeHtml(workflow.title || "科研任务")}</strong>
+      </div>
       <span class="status-pill">${escapeHtml(statusLabel(status))}</span>
     </div>
     ${workflow.current_step ? `<p>当前步骤：${escapeHtml(workflow.current_step)}</p>` : ""}

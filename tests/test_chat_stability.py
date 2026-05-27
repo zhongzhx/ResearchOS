@@ -112,7 +112,7 @@ class ChatStabilityTests(unittest.TestCase):
 
         self.assertIn('window.location.protocol === "file:"', api)
         self.assertIn("请通过 Electron 或本地服务启动", api)
-        self.assertIn("后端连接失败", chat)
+        self.assertIn("这里出了一点问题，我暂时无法回复。请稍后再试。", chat)
         self.assertIn("research_agent_api.py", electron)
         self.assertIn('replace(/^\\/api\\/backend/, "")', electron)
 

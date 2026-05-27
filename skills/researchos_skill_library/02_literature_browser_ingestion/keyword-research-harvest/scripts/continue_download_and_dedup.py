@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -27,6 +28,12 @@ PAYWALL_MARKERS = [
     "buy article",
     "rent this article",
 ]
+PDF_DOWNLOAD_SUCCESS_STATUSES = {
+    "success",
+    "oa_pdf_downloaded",
+    "institution_pdf_downloaded",
+    "browser_pdf_downloaded",
+}
 
 
 def _safe_read_csv(path: Path) -> pd.DataFrame:
@@ -282,6 +289,9 @@ def main() -> None:
     args = parser.parse_args()
 
     run_root = Path(args.run_root).resolve()
+    skill_root = Path(__file__).resolve().parents[1]
+    if str(skill_root) not in sys.path:
+        sys.path.insert(0, str(skill_root))
     candidate_path = run_root / "keyword_research_candidate_table.csv"
     pdf_dir = run_root / "downloaded_pdfs"
     log_dir = run_root / "download_logs"
@@ -300,7 +310,7 @@ def main() -> None:
     processed_ids: set[str] = set()
     if not log_df.empty and "record_id" in log_df.columns:
         if "download_status" in log_df.columns:
-            success_ids = set(log_df.loc[log_df["download_status"].eq("success"), "record_id"].astype(str))
+            success_ids = set(log_df.loc[log_df["download_status"].isin(PDF_DOWNLOAD_SUCCESS_STATUSES), "record_id"].astype(str))
         processed_ids = set(log_df["record_id"].astype(str))
 
     if args.retry_failed:
