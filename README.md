@@ -1,66 +1,66 @@
 # ResearchOS
 
-ResearchOS is a local dual-agent research workspace for wet-lab scientists. It combines a standard-library HTTP backend, Research Brain memory, execution skills, literature/evidence tooling, and an Electron desktop client.
+ResearchOS 是面向湿实验科研人员的本地双智能体研究工作空间。它结合了基于标准库的 HTTP 后端、Research Brain 记忆系统、执行技能、文献/证据工具以及 Electron 桌面客户端。
 
-## Structure
+## 项目结构
 
 ```text
 .
-├── backend/                         # Dual-agent coordination, skill routing, brain and execution adapters
-├── skills/researchos_skill_library/ # Canonical ResearchOS skills, catalog, pipelines, and resolver data
-├── electron/                        # Local desktop shell and backend proxy
-├── web_client/                      # Plain HTML/CSS/JS client
-├── scripts/check_web_client.py      # Static client smoke check
-├── run_researchos_local_api.ps1     # Local API launcher
-├── run_researchos_local_api.cmd     # Windows launcher
-└── tests/                           # Backend, skill, API, and client tests
+├── backend/                         # 双智能体协作、技能路由、Brain 与执行适配器
+├── skills/researchos_skill_library/ # 标准 ResearchOS 技能、目录、流水线与解析数据
+├── electron/                        # 本地桌面外壳与后端代理
+├── web_client/                      # 原生 HTML/CSS/JS 客户端
+├── scripts/check_web_client.py      # 客户端静态冒烟检查
+├── run_researchos_local_api.ps1     # 本地 API 启动脚本
+├── run_researchos_local_api.cmd     # Windows 启动脚本
+└── tests/                           # 后端、技能、API 与客户端测试
 ```
 
-## Local Desktop Client
+## 本地桌面客户端
 
-Start the local client:
+启动本地客户端：
 
 ```powershell
 npm run client:electron
 ```
 
-Electron opens the local `web_client/` UI, serves static assets, starts the ResearchOS HTTP API when needed, and proxies browser requests through `/api/backend/*`.
+Electron 会打开本地 `web_client/` 界面、提供静态资源、在需要时启动 ResearchOS HTTP API，并通过 `/api/backend/*` 代理浏览器请求。
 
-Default runtime values:
+默认运行参数：
 
 - API: `http://127.0.0.1:8765`
-- Agent data: `agent_data/`
-- Important environment variables: `RESEARCHOS_HOST`, `RESEARCHOS_PORT`, `RESEARCHOS_AGENT_ROOT`, `RESEARCHOS_DUAL_AGENT_API_ENABLED`
+- 智能体数据：`agent_data/`
+- 重要环境变量：`RESEARCHOS_HOST`、`RESEARCHOS_PORT`、`RESEARCHOS_AGENT_ROOT`、`RESEARCHOS_DUAL_AGENT_API_ENABLED`
 
-The Electron launcher sets `RESEARCHOS_DUAL_AGENT_API_ENABLED=true` by default for the desktop client. If the backend is launched manually and this flag is absent, gated `/api/...` dual-agent endpoints return:
+Electron 启动器会默认为桌面客户端设置 `RESEARCHOS_DUAL_AGENT_API_ENABLED=true`。如果手动启动后端且未设置该标志，受限的 `/api/...` 双智能体端点会返回：
 
 ```json
 {"ok": false, "error": "dual_agent_api_disabled"}
 ```
 
-The legacy chat route remains available:
+旧版聊天路由仍然可用：
 
 ```text
 POST /research-os/agent/chat
 ```
 
-## Client Pages
+## 客户端页面
 
-The desktop workspace includes:
+桌面工作空间包含以下页面：
 
-- Chat
-- Task Lifecycle
+- 对话（Chat）
+- 任务生命周期（Task Lifecycle）
 - Research Brain
-- Library / Evidence
-- Skills / Pipelines
-- Runs / Execution
-- Settings
+- 文献库 / 证据（Library / Evidence）
+- 技能 / 流水线（Skills / Pipelines）
+- 运行 / 执行（Runs / Execution）
+- 设置（Settings）
 
-The client is intentionally plain HTML/CSS/JS. API calls live in `web_client/api.js`, shared state in `web_client/state.js`, views in `web_client/views/`, and reusable UI fragments in `web_client/components/`.
+客户端有意采用原生 HTML/CSS/JS。API 调用位于 `web_client/api.js`，共享状态位于 `web_client/state.js`，视图位于 `web_client/views/`，可复用的 UI 片段位于 `web_client/components/`。
 
-## Key APIs
+## 关键 API
 
-Dual-agent APIs are gated by `RESEARCHOS_DUAL_AGENT_API_ENABLED=true`:
+双智能体 API 需要启用 `RESEARCHOS_DUAL_AGENT_API_ENABLED=true`：
 
 - `POST /api/agents/coordinator/run`
 - `POST /api/brain/skillrun/{skillrun_id}/process`
@@ -73,38 +73,38 @@ Dual-agent APIs are gated by `RESEARCHOS_DUAL_AGENT_API_ENABLED=true`:
 - `POST /api/skills/route`
 - `GET /api/demo/dual-agent`
 
-Core ResearchOS APIs used by the client include project, task, memory, claim, protocol, report, reference, file, SkillRun, execution memory, scheduler, and workflow-board endpoints under `/research-os/...`.
+客户端使用的 ResearchOS 核心 API 位于 `/research-os/...` 下，涵盖项目、任务、记忆、主张、协议、报告、引用、文件、SkillRun、执行记忆、调度器和工作流看板等端点。
 
-## Checks
+## 检查与测试
 
-Run the focused client tests:
+运行针对客户端的测试：
 
 ```powershell
 py -m unittest tests.test_researchos_web_client tests.test_research_agent_api_dual_agent_gate -v
 ```
 
-Run the static client check:
+运行客户端静态检查：
 
 ```powershell
 npm run client:check
 ```
 
-Run the Electron smoke test:
+运行 Electron 冒烟测试：
 
 ```powershell
 npm run client:electron:smoke
 ```
 
-Run broader backend tests:
+运行更完整的后端测试：
 
 ```powershell
 py -m unittest discover -s tests -p "test_*.py"
 $env:LLM_PROVIDER='mock'; py -m unittest discover -s backend\research_agent_runtime\scripts\tests -p "test_research_os_mvp.py"
 ```
 
-## Local Data
+## 本地数据
 
-The repository should keep code, skill definitions, tests, and required assets only. Local runtime data stays untracked:
+仓库只应保留代码、技能定义、测试和必要资源。本地运行数据不应被版本控制跟踪：
 
 - `.env`
 - `.tmp/`
@@ -112,4 +112,10 @@ The repository should keep code, skill definitions, tests, and required assets o
 - `data/`
 - `generated_outputs/`
 - `runtime/`
-- local PDFs, Office documents, databases, logs, caches, and generated research outputs
+- 本地 PDF、Office 文档、数据库、日志、缓存以及生成的研究输出
+
+## 许可证
+
+本仓库中的 ResearchOS 原始源代码和文档基于 [Apache License 2.0](LICENSE) 许可发布。
+
+包括 `opendataloader-pdf/` 在内的第三方或随附组件，仍受其自身分发的许可证与署名文件约束。
