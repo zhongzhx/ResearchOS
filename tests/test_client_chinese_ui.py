@@ -11,8 +11,10 @@ class ClientChineseUiTests(unittest.TestCase):
         chat = (ROOT / "web_client" / "views" / "chat.js").read_text(encoding="utf-8")
 
         self.assertIn('<html lang="zh-CN">', index)
-        for label in ["聊天", "任务流程", "研究大脑", "文献库", "技能", "运行记录", "设置"]:
+        for label in ["聊天", "项目", "设置"]:
             self.assertIn(label, index + chat)
+        for label in ["任务流程", "研究大脑", "文献库", "技能", "运行记录"]:
+            self.assertNotIn(label, index + chat)
         for label in ["Stable Chat", "Dual-Agent Experimental", ">Send<", ">Demo<", "No project selected"]:
             self.assertNotIn(label, chat)
 

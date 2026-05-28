@@ -56,6 +56,15 @@ class GeneralChatNotTemplateTests(unittest.TestCase):
                 self.assertNotIn("Research Task Handoff", response["answer"])
                 self.assertNotIn("当前问题似乎不完整", response["answer"])
 
+    def test_capability_question_uses_capability_catalog_not_empty_llm_fallback(self) -> None:
+        response = ros.agent_chat(self.agent_root, {"project_id": "demo_project", "message": "你有什么功能"})
+
+        self.assertEqual(response["intent"], "capability_explanation")
+        self.assertNotEqual(response["answer_source"], "llm")
+        self.assertNotIn(SENTINEL, response["answer"])
+        self.assertNotIn("未获得模型回答", response["answer"])
+        self.assertIn("文献", response["answer"])
+
 
 if __name__ == "__main__":
     unittest.main()

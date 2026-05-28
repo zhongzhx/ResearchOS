@@ -1,5 +1,5 @@
 import { getHealth, getLlmSettings, getResolverHealth, getRuntimeStatus, getSchedulerStatus, saveLlmSettings, testLlmSettings } from "../api.js";
-import { appState } from "../state.js";
+import { appState, setDeveloperMode } from "../state.js";
 import { apiErrorCard, badge, escapeHtml, itemCard, metricCards, text } from "../components/cards.js";
 import { emptyState } from "../components/empty_state.js";
 import { jsonDetails } from "../components/json_viewer.js";
@@ -26,7 +26,7 @@ function dualAgentSection(resolver, demoAvailable) {
       ${badge(disabled ? "RESEARCHOS_DUAL_AGENT_API_ENABLED=false" : "双 Agent API 已启用", disabled ? "warning" : "success")}
       ${badge(demoAvailable ? "演示接口可用" : "演示接口受限", demoAvailable ? "success" : "muted")}
     </div>
-    ${disabled ? emptyState("双 Agent API 未启用", "启动本地客户端前设置 RESEARCHOS_DUAL_AGENT_API_ENABLED=true，即可启用协调器、解析器、目录、流程和待处理技能接口。") : jsonDetails("解析器状态", resolver.data || resolver, true)}
+    ${disabled ? emptyState("双 Agent API 未启用", "启动本地客户端前设置 RESEARCHOS_DUAL_AGENT_API_ENABLED=true，即可启用协调器、解析器、目录、流程和待处理技能接口。") : jsonDetails("解析器状态", resolver.data || resolver)}
   </div>`;
 }
 
@@ -91,10 +91,17 @@ function llmSettingsSection(settings) {
   </div>`;
 }
 
+function preferenceSection() {
+  return `<div class="grid">
+    <label class="check-row"><input id="developerModeToggle" type="checkbox" ${appState.developerMode ? "checked" : ""} /> 开发者模式</label>
+    <p class="muted">开启后会显示任务调试、研究记忆、技能目录、运行记录和 API 诊断页面。</p>
+  </div>`;
+}
+
 export async function renderSettingsView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
-      <div><h1 class="page-title">设置</h1><p class="page-subtitle">运行状态、双 Agent 可用性、解析器健康、调度器状态和 LLM provider 设置。</p></div>
+      <div><h1 class="page-title">设置</h1><p class="page-subtitle">管理 AURA Research 的本地偏好和模型连接。</p></div>
     </header>
     <div class="page-scroll"><div class="grid" id="settingsContent">${emptyState("正在加载设置", "正在检查本地运行时和设置接口。")}</div></div>
   </section>`;
@@ -107,11 +114,22 @@ export async function renderSettingsView({ root }) {
     getLlmSettings(),
   ]);
   root.querySelector("#settingsContent").innerHTML = `
-    <div class="panel pad"><h2 class="item-title">运行状态</h2>${runtimeSection(health, runtime, scheduler)}</div>
-    <div class="panel pad"><h2 class="item-title">双 Agent</h2>${dualAgentSection(resolver, resolver.ok)}</div>
     <div class="panel pad"><h2 class="item-title">LLM 服务 / API 设置</h2>${llmSettingsSection(llm)}</div>
-    <div class="panel pad"><h2 class="item-title">诊断</h2>${health.ok ? jsonDetails("运行时原始数据", { health: health.data, runtime: runtime.data, scheduler: scheduler.data }) : apiErrorCard(health, "后端不可用")}</div>
+    <div class="panel pad"><h2 class="item-title">偏好</h2>${preferenceSection()}</div>
+    ${
+      appState.developerMode
+        ? `<div class="panel pad"><h2 class="item-title">运行状态</h2>${runtimeSection(health, runtime, scheduler)}</div>
+          <div class="panel pad"><h2 class="item-title">API / Resolver 诊断</h2>${dualAgentSection(resolver, resolver.ok)}</div>
+          <div class="panel pad"><h2 class="item-title">诊断</h2>${health.ok ? jsonDetails("运行时原始数据", { health: health.data, runtime: runtime.data, scheduler: scheduler.data }) : apiErrorCard(health, "服务不可用")}</div>`
+        : ""
+    }
   `;
+
+  root.querySelector("#developerModeToggle")?.addEventListener("change", (event) => {
+    setDeveloperMode(event.target.checked);
+    window.dispatchEvent(new CustomEvent("researchos:refresh-navigation"));
+    renderSettingsView({ root });
+  });
 
   const form = root.querySelector("#llmForm");
   if (form && llm.ok) {

@@ -1,76 +1,28 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import re
 import sys
 import time
 import urllib.error
-import traceback
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+
+PDF_DOWNLOAD_SUCCESS_STATUSES = {
+    "success",
+    "oa_pdf_downloaded",
+    "institution_pdf_downloaded",
+    "browser_pdf_downloaded",
+}
+FULLTEXT_DOWNLOAD_SUCCESS_STATUSES = PDF_DOWNLOAD_SUCCESS_STATUSES | {"html_saved", "xml_saved"}
 
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def cancel_requested(run_root: Path) -> bool:
-    return (run_root / ".researchos_cancel").exists()
-
-
-def raise_if_cancelled(run_root: Path) -> None:
-    if cancel_requested(run_root):
-        raise SystemExit("keyword harvest cancelled by user")
-
-
-def log(message: str) -> None:
-    print(f"[keyword-harvest] {message}", flush=True)
-
-
-def stable_candidate_record_id(row: pd.Series, fallback_index: int, utils: Any) -> str:
-    parts = [
-        utils.clean_text(row.get("doi")),
-        utils.clean_text(row.get("pmid")),
-        utils.clean_text(row.get("pmcid")),
-        utils.normalize_title(row.get("title")) if hasattr(utils, "normalize_title") else utils.clean_text(row.get("title")).lower(),
-        utils.clean_text(row.get("source_record_id")),
-    ]
-    key = "|".join(part for part in parts if part) or f"row:{fallback_index}"
-    digest = hashlib.sha1(key.encode("utf-8", errors="ignore")).hexdigest()[:16]
-    return f"KWPAPER-{digest}"
-
-
-def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-
-
-def safe_read_csv(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        return pd.read_csv(path)
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame()
-
-
-def short_download_filename(record_id: Any, stem: str, extension: str) -> str:
-    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(record_id or "record")).strip("._-") or "record"
-    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(stem or "")).strip("._-")
-    safe_stem = safe_stem[:42].strip("._-")
-    return f"{safe_id}_{safe_stem}{extension}" if safe_stem else f"{safe_id}{extension}"
 
 
 def detect_terms(text: str, terms: list[str]) -> list[str]:
@@ -100,29 +52,11 @@ def route_label(url: str) -> str:
     return "publisher_direct"
 
 
-def looks_like_direct_fulltext_url(url: str) -> bool:
-    lowered = (url or "").lower()
-    if not lowered.startswith(("http://", "https://")):
-        return False
-    return any(
-        token in lowered
-        for token in [
-            ".pdf",
-            "/pdf",
-            "pdf=",
-            "download",
-            "fulltextxml",
-            "fulltext/xml",
-            ".xml",
-        ]
-    )
-
-
 def candidate_urls(row: pd.Series, utils: Any) -> list[str]:
     urls: list[str] = []
-    for key in ["pdf_url", "fulltext_url"]:
+    for key in ["pdf_url", "fulltext_url", "landing_page_url"]:
         value = utils.clean_text(row.get(key))
-        if looks_like_direct_fulltext_url(value):
+        if value.startswith("http://") or value.startswith("https://"):
             urls.append(value)
     raw_json = utils.clean_text(row.get("candidate_urls_json"))
     if raw_json:
@@ -136,10 +70,13 @@ def candidate_urls(row: pd.Series, utils: Any) -> list[str]:
                         value = utils.clean_text(item.get("url"))
                     else:
                         value = ""
-                    if looks_like_direct_fulltext_url(value):
+                    if value.startswith("http://") or value.startswith("https://"):
                         urls.append(value)
         except json.JSONDecodeError:
             pass
+    doi = utils.normalize_doi(row.get("doi"))
+    if doi:
+        urls.append(f"https://doi.org/{doi}")
     unique: list[str] = []
     seen: set[str] = set()
     for url in urls:
@@ -203,7 +140,7 @@ def build_candidate_rows(raw_df: pd.DataFrame, config: dict[str, Any], utils: An
         priority = "high" if score >= 4 else ("medium" if score >= 2 else "low")
         rows.append(
             {
-                "record_id": stable_candidate_record_id(row, idx + 1, utils),
+                "record_id": f"KWRAW-{idx + 1:06d}",
                 "title": title,
                 "authors": utils.clean_text(row.get("authors")),
                 "year": row.get("year"),
@@ -235,13 +172,13 @@ def build_candidate_rows(raw_df: pd.DataFrame, config: dict[str, Any], utils: An
     return pd.DataFrame(rows)
 
 
-def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downloader: Any, config: dict[str, Any]) -> pd.DataFrame:
-    work_dir = run_root / "_work"
-    pdf_dir = work_dir / "downloaded_pdfs"
-    non_pdf_dir = work_dir / "non_pdf"
-    log_dir = work_dir / "download_logs"
+def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downloader: Any, config: dict[str, Any],
+                  institutional: bool = False, browser_assisted: bool = False,
+                  browser_profile_dir: str | None = None, headless: bool = True,
+                  publisher_delay: float = 1.0) -> pd.DataFrame:
+    pdf_dir = run_root / "downloaded_pdfs"
+    log_dir = run_root / "download_logs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
-    non_pdf_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "keyword_research_download_log.csv"
 
@@ -249,17 +186,24 @@ def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downlo
     max_attempts = int(config.get("download", {}).get("max_attempts_per_record", 3))
     delay_seconds = float(config.get("delay_seconds", {}).get("download", 0.2))
 
-    existing_log = safe_read_csv(log_path)
+    # Import new modules if institutional/browser mode is enabled
+    institutional_resolver = None
+    if institutional:
+        try:
+            from literature_harvest.institutional_resolver import InstitutionalResolver  # noqa: WPS433
+            institutional_resolver = InstitutionalResolver(timeout=timeout_seconds, delay=publisher_delay)
+        except ImportError:
+            print("Warning: literature_harvest package not found; institutional resolver disabled")
+
+    existing_log = pd.read_csv(log_path) if log_path.exists() else pd.DataFrame()
     processed = set(existing_log.get("record_id", pd.Series(dtype=str)).astype(str))
     target_df = candidate_df.loc[
         candidate_df["exclusion_reason_if_any"].fillna("").eq("")
         & ~candidate_df["record_id"].astype(str).isin(processed)
     ].copy()
-    log(f"download queue: {len(target_df)} new candidate(s), {len(processed)} already processed")
 
     rows: list[dict[str, Any]] = []
     for idx, (_, row) in enumerate(target_df.iterrows(), start=1):
-        raise_if_cancelled(run_root)
         status = "metadata_only"
         reason = "no_candidate_url"
         final_path = ""
@@ -267,10 +211,6 @@ def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downlo
         access_route = "failed"
         content_format = ""
         attempts = 0
-        fallback_path = ""
-        fallback_url = ""
-        fallback_route = ""
-        fallback_format = ""
 
         for url in candidate_urls(row, utils)[:max_attempts]:
             attempts += 1
@@ -292,20 +232,8 @@ def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downlo
                     extension = ".html"
                 elif kind == "xml":
                     extension = ".xml"
-                output_dir = pdf_dir if kind == "pdf" else non_pdf_dir
-                output = output_dir / short_download_filename(row.get("record_id"), utils.stable_file_stem(row), extension)
+                output = pdf_dir / f"{row['record_id']}_{utils.stable_file_stem(row)}{extension}"
                 output.write_bytes(payload)
-                if kind != "pdf":
-                    fallback_path = fallback_path or str(output)
-                    fallback_url = fallback_url or final_url
-                    fallback_route = fallback_route or route_label(final_url)
-                    fallback_format = fallback_format or kind
-                    status = "fulltext_only"
-                    reason = "non_pdf_fulltext_saved"
-                    final_path = fallback_path
-                    access_route = fallback_route
-                    content_format = fallback_format
-                    continue
                 status = "success"
                 reason = ""
                 final_path = str(output)
@@ -332,13 +260,69 @@ def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downlo
             finally:
                 time.sleep(delay_seconds)
 
-        if not final_path and fallback_path:
-            status = "fulltext_only"
-            reason = "non_pdf_fulltext_saved"
-            final_path = fallback_path
-            final_url = fallback_url
-            access_route = fallback_route
-            content_format = fallback_format
+        # ── Institutional resolver fallback ──────────────────────
+        if status != "success" and institutional_resolver is not None:
+            doi = utils.normalize_doi(row.get("doi"))
+            if doi:
+                resolve_result = institutional_resolver.resolve(doi, {"title": row.get("title")})
+                if resolve_result.selected_pdf_url and resolve_result.status in (
+                    "oa_pdf_downloaded", "institution_pdf_downloaded",
+                ):
+                    try:
+                        dl_response = downloader.attempt_download(resolve_result.selected_pdf_url, timeout_seconds)
+                        if dl_response["payload"].startswith(b"%PDF"):
+                            output = pdf_dir / f"{row['record_id']}_{utils.stable_file_stem(row)}_institutional.pdf"
+                            output.write_bytes(dl_response["payload"])
+                            status = "institution_pdf_downloaded"
+                            reason = "institutional_resolver"
+                            final_path = str(output)
+                            final_url = resolve_result.selected_pdf_url
+                            access_route = "institutional"
+                            content_format = "pdf"
+                    except Exception:
+                        pass
+                if status.startswith("institution_") or resolve_result.status == "institution_login_required":
+                    reason = resolve_result.reason or reason
+
+        # ── Browser-assisted fallback ────────────────────────────
+        if status != "success" and browser_assisted:
+            doi = utils.normalize_doi(row.get("doi"))
+            if doi:
+                try:
+                    from literature_harvest.browser_downloader import BrowserDownloader  # noqa: WPS433
+                    browser = BrowserDownloader(timeout=timeout_seconds)
+                    br_result = browser.download(
+                        doi=doi,
+                        landing_url=row.get("landing_page_url", ""),
+                        profile_dir=browser_profile_dir,
+                        headless=headless,
+                        output_dir=str(pdf_dir / "browser_downloads"),
+                    )
+                    if br_result.download_status == "browser_pdf_downloaded":
+                        status = "browser_pdf_downloaded"
+                        reason = "browser_assisted"
+                        final_path = br_result.final_pdf_path
+                        final_url = br_result.final_pdf_url
+                        access_route = "browser"
+                        content_format = "pdf"
+                except ImportError:
+                    pass  # Playwright not installed
+                except Exception:
+                    pass
+
+        # Map legacy status to new DownloadStatus for the output row
+        download_status = status
+        if status == "success":
+            if content_format == "pdf":
+                download_status = "oa_pdf_downloaded"
+            elif content_format == "html":
+                download_status = "html_saved"
+            elif content_format == "xml":
+                download_status = "xml_saved"
+        elif status == "inaccessible":
+            download_status = "paywall_detected_no_entitlement"
+        elif status == "broken_link":
+            download_status = "broken_link"
 
         rows.append(
             {
@@ -347,87 +331,89 @@ def run_downloads(candidate_df: pd.DataFrame, run_root: Path, utils: Any, downlo
                 "title": row.get("title"),
                 "final_pdf_path": final_path,
                 "final_pdf_url": final_url,
-                "download_status": status,
+                "download_status": download_status,
                 "failure_reason": reason,
                 "access_route_used": access_route,
                 "content_format": content_format,
                 "attempt_count": attempts,
             }
         )
-        if status == "success":
-            log(f"downloaded {idx}/{len(target_df)}: {content_format or 'file'} {row.get('title')}")
-        elif idx == 1 or idx % 10 == 0:
-            log(f"download checked {idx}/{len(target_df)}: {status} {reason}")
-        chunk = pd.DataFrame(rows)
-        if log_path.exists():
-            combined = pd.concat([safe_read_csv(log_path), chunk], ignore_index=True)
-        else:
-            combined = chunk
-        combined = combined.drop_duplicates(subset=["record_id"], keep="last")
-        combined.to_csv(log_path, index=False, encoding="utf-8-sig")
-        rows = []
+        if idx % 50 == 0:
+            chunk = pd.DataFrame(rows)
+            if log_path.exists():
+                combined = pd.concat([pd.read_csv(log_path), chunk], ignore_index=True)
+            else:
+                combined = chunk
+            combined = combined.drop_duplicates(subset=["record_id"], keep="last")
+            combined.to_csv(log_path, index=False, encoding="utf-8-sig")
+            rows = []
 
     if log_path.exists():
-        combined = pd.concat([safe_read_csv(log_path), pd.DataFrame(rows)], ignore_index=True)
+        combined = pd.concat([pd.read_csv(log_path), pd.DataFrame(rows)], ignore_index=True)
     else:
         combined = pd.DataFrame(rows)
     if not combined.empty:
         combined = combined.drop_duplicates(subset=["record_id"], keep="last")
     combined.to_csv(log_path, index=False, encoding="utf-8-sig")
+
+    # ── Write structured output files ──────────────────────────
+    _write_structured_outputs(run_root, rows)
     return combined
 
 
-def build_write_and_download(
-    run_root: Path,
-    config: dict[str, Any],
-    utils: Any,
-    downloader: Any,
-    *,
-    load_sources: Any,
-    normalize_columns: Any,
-    deduplicate_sources: Any | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    raw_df, _ = load_sources()
-    raw_df = normalize_columns(raw_df)
-    if deduplicate_sources is not None and not raw_df.empty:
-        raw_df, _ = deduplicate_sources(raw_df)
-    candidate_df = build_candidate_rows(raw_df, config, utils)
-    if candidate_df.empty:
-        for column in [
-            "record_id",
-            "exclusion_reason_if_any",
-            "keyword_relevance_score",
-            "year",
-            "download_status",
-        ]:
-            if column not in candidate_df.columns:
-                candidate_df[column] = pd.Series(dtype="object")
-    else:
-        candidate_df = candidate_df.sort_values(["keyword_relevance_score", "year"], ascending=[False, False], na_position="last").reset_index(drop=True)
-    utils.write_csv(candidate_df, run_root / "keyword_research_candidate_table.csv")
+def _write_structured_outputs(run_root: Path, rows: list[dict[str, Any]]) -> None:
+    """Write JSONL and summary files for Agent consumption."""
+    import json as _json
 
-    high_df = candidate_df.loc[candidate_df["exclusion_reason_if_any"].eq("") & candidate_df["keyword_relevance_score"].ge(4)].copy()
-    medium_df = candidate_df.loc[candidate_df["exclusion_reason_if_any"].eq("") & candidate_df["keyword_relevance_score"].between(2, 3)].copy()
-    utils.write_csv(high_df, run_root / "keyword_research_high_priority.csv")
-    utils.write_csv(medium_df, run_root / "keyword_research_medium_priority.csv")
+    # download_status.jsonl
+    status_path = run_root / "download_status.jsonl"
+    if rows:
+        with status_path.open("w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(_json.dumps(r, ensure_ascii=False) + "\n")
 
-    log(f"candidate table updated: {len(candidate_df)} rows; high={len(high_df)}, medium={len(medium_df)}")
-    log_df = run_downloads(candidate_df, run_root, utils, downloader, config)
-    raise_if_cancelled(run_root)
+    # manual_download_queue.csv
+    manual = [r for r in rows if r.get("download_status") in (
+        "manual_download_required", "paywall_detected_no_entitlement",
+        "institution_login_required",
+    )]
+    if manual:
+        import csv
+        queue_path = run_root / "manual_download_queue.csv"
+        manual_fields = ["title", "doi", "download_status", "failure_reason", "access_route_used", "final_pdf_url"]
+        with queue_path.open("w", encoding="utf-8-sig", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=manual_fields)
+            w.writeheader()
+            for r in manual:
+                w.writerow({k: r.get(k, "") for k in manual_fields})
 
-    if {"record_id", "download_status"}.issubset(set(log_df.columns)):
-        status = log_df[["record_id", "download_status"]].drop_duplicates("record_id", keep="last")
-    else:
-        status = pd.DataFrame(columns=["record_id", "download_status"])
-    candidate_df = candidate_df.drop(columns=["download_status"], errors="ignore").merge(status, on="record_id", how="left")
-    candidate_df["download_status"] = candidate_df["download_status"].fillna(candidate_df["exclusion_reason_if_any"].map(lambda x: "excluded" if x else "pending"))
-    utils.write_csv(candidate_df, run_root / "keyword_research_candidate_table.csv")
-    return candidate_df, high_df, medium_df, log_df
+    # download_summary.json
+    from literature_harvest.status import DownloadStatus as DS
+    summary = {
+        "total_candidates": len(rows),
+        "oa_pdf_downloaded": sum(1 for r in rows if r.get("download_status") == DS.OA_PDF_DOWNLOADED.value),
+        "institution_pdf_downloaded": sum(1 for r in rows if r.get("download_status") == DS.INSTITUTION_PDF_DOWNLOADED.value),
+        "browser_pdf_downloaded": sum(1 for r in rows if r.get("download_status") == DS.BROWSER_PDF_DOWNLOADED.value),
+        "html_saved": sum(1 for r in rows if r.get("download_status") == DS.HTML_SAVED.value),
+        "xml_saved": sum(1 for r in rows if r.get("download_status") == DS.XML_SAVED.value),
+        "manual_download_required": sum(1 for r in rows if r.get("download_status") == DS.MANUAL_DOWNLOAD_REQUIRED.value),
+        "failed": sum(1 for r in rows if r.get("download_status") in (
+            DS.DOWNLOAD_FAILED.value, DS.BROKEN_LINK.value, DS.RATE_LIMITED.value,
+            DS.PUBLISHER_BLOCKED.value,
+        )),
+        "duplicates": 0,
+        "ingest_pending": 0,
+    }
+    summary_path = run_root / "download_summary.json"
+    with summary_path.open("w", encoding="utf-8") as f:
+        _json.dump(summary, f, ensure_ascii=False, indent=2)
 
 
 def write_summary(run_root: Path, candidate_df: pd.DataFrame, high_df: pd.DataFrame, medium_df: pd.DataFrame, log_df: pd.DataFrame) -> None:
-    success = int(log_df["download_status"].eq("success").sum()) if not log_df.empty else 0
-    pdf_count = int(log_df.loc[log_df["download_status"].eq("success"), "content_format"].fillna("").eq("pdf").sum()) if not log_df.empty else 0
+    success_mask = log_df["download_status"].isin(FULLTEXT_DOWNLOAD_SUCCESS_STATUSES) if not log_df.empty else pd.Series(dtype=bool)
+    pdf_mask = log_df["download_status"].isin(PDF_DOWNLOAD_SUCCESS_STATUSES) if not log_df.empty else pd.Series(dtype=bool)
+    success = int(success_mask.sum()) if not log_df.empty else 0
+    pdf_count = int(log_df.loc[pdf_mask, "content_format"].fillna("").eq("pdf").sum()) if not log_df.empty else 0
     non_pdf = success - pdf_count
     pending = int(candidate_df["download_status"].eq("pending").sum())
     lines = [
@@ -440,7 +426,7 @@ def write_summary(run_root: Path, candidate_df: pd.DataFrame, high_df: pd.DataFr
         f"- True PDFs: `{pdf_count}`",
         f"- HTML/XML full texts: `{non_pdf}`",
         f"- Remaining pending: `{pending}`",
-        f"- Download log: `{run_root / '_work' / 'download_logs' / 'keyword_research_download_log.csv'}`",
+        f"- Download log: `{run_root / 'download_logs' / 'keyword_research_download_log.csv'}`",
     ]
     (run_root / "keyword_research_harvest_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -451,22 +437,30 @@ def main() -> None:
     parser.add_argument("--config", required=True, help="JSON config path")
     parser.add_argument("--run-name", required=True, help="New run folder name under literature_harvest")
     parser.add_argument("--skip-search", action="store_true")
+    parser.add_argument("--institutional", action="store_true", help="Enable institutional resolver fallback for non-OA papers")
+    parser.add_argument("--browser-assisted", action="store_true", help="Enable Playwright browser-assisted download")
+    parser.add_argument("--browser-profile-dir", default=None, help="Path to persistent browser profile directory")
+    parser.add_argument("--headless", action="store_true", default=True, help="Run browser headless (default: True)")
+    parser.add_argument("--max-institutional-downloads", type=int, default=50, help="Max downloads via institutional route")
+    parser.add_argument("--publisher-delay", type=float, default=1.0, help="Delay between publisher requests (seconds)")
+    parser.add_argument("--rate-limit", type=int, default=3, help="Max requests per second")
+    parser.add_argument("--resume", action="store_true", help="Resume previous run (skip already-downloaded)")
     args = parser.parse_args()
 
     output_root = Path(args.output_root).resolve()
     run_root = output_root / args.run_name
     run_root.mkdir(parents=True, exist_ok=True)
-    work_root = run_root / "_work"
-    work_root.mkdir(parents=True, exist_ok=True)
-    os.environ["ASPERGILLUS_HARVEST_ROOT"] = str(work_root)
+    os.environ["ASPERGILLUS_HARVEST_ROOT"] = str(run_root)
 
     skill_root = Path(__file__).resolve().parents[1]
     scripts_dir = skill_root / "literature_harvest" / "scripts"
-    sys.path.insert(0, str(scripts_dir))
+    for import_root in (skill_root, scripts_dir):
+        if str(import_root) not in sys.path:
+            sys.path.insert(0, str(import_root))
 
     from download_fulltexts import attempt_download, classify_payload, looks_paywalled  # noqa: WPS433
     from harvest_utils import ensure_directories, load_config, write_csv  # noqa: WPS433
-    from merge_and_deduplicate import deduplicate, load_sources, normalize_columns  # noqa: WPS433
+    from merge_and_deduplicate import load_sources, normalize_columns  # noqa: WPS433
     from search_crossref import search_crossref  # noqa: WPS433
     from search_europepmc import search_europepmc  # noqa: WPS433
     from search_openalex import search_openalex  # noqa: WPS433
@@ -475,6 +469,23 @@ def main() -> None:
 
     config = load_json(Path(args.config))
     ensure_directories()
+
+    if not args.skip_search:
+        search_pubmed_and_pmc(args.config)
+        search_europepmc(args.config)
+        search_crossref(args.config)
+        search_openalex(args.config)
+
+    raw_df, _ = load_sources()
+    raw_df = normalize_columns(raw_df)
+    candidate_df = build_candidate_rows(raw_df, config, utils)
+    candidate_df = candidate_df.sort_values(["keyword_relevance_score", "year"], ascending=[False, False], na_position="last").reset_index(drop=True)
+    write_csv(candidate_df, run_root / "keyword_research_candidate_table.csv")
+
+    high_df = candidate_df.loc[candidate_df["exclusion_reason_if_any"].eq("") & candidate_df["keyword_relevance_score"].ge(4)].copy()
+    medium_df = candidate_df.loc[candidate_df["exclusion_reason_if_any"].eq("") & candidate_df["keyword_relevance_score"].between(2, 3)].copy()
+    write_csv(high_df, run_root / "keyword_research_high_priority.csv")
+    write_csv(medium_df, run_root / "keyword_research_medium_priority.csv")
 
     downloader = type(
         "DownloaderNamespace",
@@ -485,60 +496,20 @@ def main() -> None:
             "looks_paywalled": staticmethod(looks_paywalled),
         },
     )
-
-    candidate_df = pd.DataFrame()
-    high_df = pd.DataFrame()
-    medium_df = pd.DataFrame()
-    log_df = pd.DataFrame()
-
-    if not args.skip_search:
-        search_stages = [
-            ("OpenAlex", search_openalex),
-            ("Crossref", search_crossref),
-            ("EuropePMC", search_europepmc),
-            ("PubMed/PMC", search_pubmed_and_pmc),
-        ]
-        for source_name, search_func in search_stages:
-            raise_if_cancelled(run_root)
-            log(f"search started: {source_name}")
-            try:
-                source_df = search_func(args.config)
-                log(f"search finished: {source_name}, rows={len(source_df)}")
-            except Exception as exc:  # noqa: BLE001
-                append_jsonl(
-                    run_root / "search_stage_errors.jsonl",
-                    {
-                        "source": source_name,
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                        "traceback": traceback.format_exc(limit=4),
-                    },
-                )
-                log(f"search failed: {source_name}, {type(exc).__name__}: {exc}")
-                continue
-            candidate_df, high_df, medium_df, log_df = build_write_and_download(
-                run_root,
-                config,
-                utils,
-                downloader,
-                load_sources=load_sources,
-                normalize_columns=normalize_columns,
-                deduplicate_sources=deduplicate,
-            )
-    else:
-        log("skip-search enabled; using existing raw API result tables")
-
-    candidate_df, high_df, medium_df, log_df = build_write_and_download(
-        run_root,
-        config,
-        utils,
-        downloader,
-        load_sources=load_sources,
-        normalize_columns=normalize_columns,
-        deduplicate_sources=deduplicate,
+    log_df = run_downloads(
+        candidate_df, run_root, utils, downloader, config,
+        institutional=args.institutional,
+        browser_assisted=args.browser_assisted,
+        browser_profile_dir=args.browser_profile_dir,
+        headless=args.headless,
+        publisher_delay=args.publisher_delay,
     )
+
+    status = log_df[["record_id", "download_status"]].drop_duplicates("record_id", keep="last")
+    candidate_df = candidate_df.drop(columns=["download_status"], errors="ignore").merge(status, on="record_id", how="left")
+    candidate_df["download_status"] = candidate_df["download_status"].fillna(candidate_df["exclusion_reason_if_any"].map(lambda x: "excluded" if x else "pending"))
+    write_csv(candidate_df, run_root / "keyword_research_candidate_table.csv")
     write_summary(run_root, candidate_df, high_df, medium_df, log_df)
-    log("keyword harvest first pass completed")
 
 
 if __name__ == "__main__":

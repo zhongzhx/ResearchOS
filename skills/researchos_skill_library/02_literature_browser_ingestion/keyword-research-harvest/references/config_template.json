@@ -9,14 +9,14 @@
     "openalex": true
   },
   "max_results_per_query": {
-    "pubmed": 2000,
-    "pmc": 2000,
-    "europepmc": 2000,
-    "crossref": 2000,
-    "openalex": 2000
+    "pubmed": 120,
+    "pmc": 120,
+    "europepmc": 120,
+    "crossref": 120,
+    "openalex": 120
   },
   "page_size": {
-    "europepmc": 1000,
+    "europepmc": 100,
     "crossref": 100,
     "openalex": 100
   },
@@ -32,6 +32,15 @@
     "enabled": true,
     "timeout_seconds": 30,
     "max_attempts_per_record": 3
+  },
+  "institutional": {
+    "enabled": false,
+    "publisher_delay_seconds": 1.0
+  },
+  "browser_assisted": {
+    "enabled": false,
+    "profile_dir": "",
+    "headless": true
   },
   "research_article_preference": true,
   "exclude_reviews_by_default": false,

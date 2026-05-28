@@ -128,7 +128,7 @@ export const sendLegacyChat = (message, projectId, conversationId = "", sessionI
   });
 };
 
-// experimental: only call when the user explicitly enables dual-agent mode.
+// Internal coordinator entry; only call after the user enables developer controls.
 export const runCoordinator = (userQuery, projectId, conversationId = "", sessionId = "") => {
   const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID);
   const safeConversationId = stableId(conversationId, stableId(sessionId, defaultChatSessionId(safeProjectId)));
@@ -142,15 +142,15 @@ export const runCoordinator = (userQuery, projectId, conversationId = "", sessio
 };
 export const runDualAgentDemo = (projectId) => apiGet(withProject("/api/demo/dual-agent", projectId));
 
-// demo_only: product feature contracts and demo previews. Real product execution is not wired from the UI.
+// Product feature contracts and previews are developer-facing until real execution is connected.
 export const getProductFeatures = () => apiGet("/api/product/features");
 export const getProductFeature = (featureId) => apiGet(`/api/product/features/${encodeURIComponent(featureId)}`);
 export const runProductFeature = (featureId, payload = {}) =>
-  notConnected(featureId, "该产品功能入口已预留，当前后端尚未接入真实执行链路；请使用 demo_only 预览。");
+  notConnected(featureId, "该产品功能入口已预留，当前后端尚未接入真实执行链路；请在功能导航中查看预览。");
 export const runProductFeatureDemo = (featureId, projectId) => apiGet(withProject(`/api/product/features/${encodeURIComponent(featureId)}/demo`, projectId));
 export const runProductDemoFlow = (projectId) => apiGet(withProject("/api/demo/product-flow", projectId));
 
-// experimental: skill catalog, pipeline registry, route tester, and generated skill review.
+// Developer console APIs for catalogs, workflow registry, route checks, and generated-skill review.
 export const getSkillCatalog = () => apiGet("/api/skills/catalog");
 export const getSkillPipelines = () => apiGet("/api/skills/pipelines");
 export const routeSkillQuery = (query, projectId) => apiPost("/api/skills/route", { user_query: query, project_id: projectId });
@@ -159,7 +159,7 @@ export const getPendingSkills = () => apiGet("/api/self-evolution/pending-skills
 export const activatePendingSkill = (skillName) => apiPost(`/api/self-evolution/skills/${encodeURIComponent(skillName)}/activate`, {});
 export const rejectPendingSkill = (skillName, reason) => apiPost(`/api/self-evolution/skills/${encodeURIComponent(skillName)}/reject`, { reason });
 
-// experimental: MemoryOS read/actions are gated by RESEARCHOS_MEMORYOS_ENABLED.
+// MemoryOS read/actions are gated by RESEARCHOS_MEMORYOS_ENABLED.
 export const getWorkingMemory = (projectId) => apiGet(withProject("/api/memory/working", projectId));
 export const getCognitiveState = (projectId) => apiGet(withProject("/api/memory/cognitive-state", projectId));
 export const refreshCognitiveState = (projectId, taskId = "") => apiPost("/api/memory/cognitive-state/refresh", { project_id: projectId, task_id: taskId });
@@ -192,8 +192,8 @@ export const createProject = (payload) => apiPost("/research-os/projects", paylo
 export const updateProject = (projectId, payload) => apiPut(`/research-os/projects/${encodeURIComponent(projectId)}`, payload);
 export const archiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/archive`, {});
 export const unarchiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/unarchive`, {});
-export const clearProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/clear`, {});
-export const purgeProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/purge`, {});
+export const clearProject = (projectId, payload = {}) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/clear`, payload);
+export const purgeProject = (projectId, payload = {}) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/purge`, payload);
 export const createTask = (payload) => apiPost("/research-os/tasks", payload);
 export const runTask = (taskId, payload = {}) => apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/run`, payload);
 export const cancelTask = (taskId, payload = {}) => apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/cancel`, payload);
@@ -241,6 +241,97 @@ export const markReferenceImportant = (referenceId, payload = {}) => apiPost(`/r
 export const excludeReference = (referenceId, payload = {}) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/exclude`, payload);
 export const linkReference = (referenceId, payload) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/link`, payload);
 export const buildKnowledgeBase = (payload) => apiPost("/research-os/knowledge-base/build", payload);
+
+function workflowPrompt(intent, params) {
+  return [
+    `请执行用户确认过的科研工作流：${intent}`,
+    ...Object.entries(params || {}).map(([key, value]) => `${key}: ${value}`),
+    "请用中文返回执行进度、成功/失败原因、下一步建议，不要展示内部技术对象。",
+  ].join("\n");
+}
+
+function workflowNotConnected(intent, detail = "真实执行入口尚未接入") {
+  return {
+    ok: false,
+    status: "not_connected",
+    intent,
+    title: "暂不能执行",
+    message: `当前只能生成执行计划，${detail}。`,
+    steps: ["已完成用户确认", "尚未连接真实执行入口"],
+    next_step: "可以先在工作台或对话中继续完善参数。",
+    technical: { intent, detail },
+  };
+}
+
+function failedWorkflowStep(intent, label, result) {
+  const status = result?.data?.status || "";
+  if (status === "not_connected" || status === "partial" || status === "demo_only") return workflowNotConnected(intent);
+  return {
+    ok: false,
+    status: "failed",
+    intent,
+    title: "任务执行失败",
+    message: `${label}没有完成：${result?.error || result?.data?.message || "后端没有返回成功状态"}`,
+    steps: [`${label}失败`],
+    next_step: "请检查项目、文件或后端服务状态后重试。",
+    technical: result?.data || result,
+  };
+}
+
+function manualQueueCount(result) {
+  const payload = result?.data || {};
+  const rows = payload.paper_requests || payload.requests || payload.manual_queue || [];
+  return Array.isArray(rows) ? rows.length : Number(payload.manual_queue_count || 0);
+}
+
+export async function executeConfirmedWorkflow(intent, params = {}, context = {}) {
+  const projectId = params.project_id || context.projectId || DEFAULT_PROJECT_ID;
+  if (intent === "literature_harvest_and_kb") {
+    const payload = {
+      project_id: projectId,
+      query: params.topic || params.query,
+      keywords: [params.topic || params.query].filter(Boolean),
+      max_results: Number(params.max_papers || 20),
+      oa_only: params.oa_only !== false,
+      non_oa_policy: params.non_oa_policy || "manual_queue",
+    };
+    const createTask = await createLiteratureSearchTask(payload);
+    if (!createTask.ok) return failedWorkflowStep(intent, "创建文献采集任务", createTask);
+    const search = await runLiteratureSearch(payload);
+    if (!search.ok) return failedWorkflowStep(intent, "检索文献", search);
+    const paperRequests = await generatePaperRequests({ project_id: projectId });
+    if (!paperRequests.ok) return failedWorkflowStep(intent, "整理手动下载队列", paperRequests);
+    let kb = null;
+    if (params.build_kb !== false) {
+      kb = await buildKnowledgeBase({ project_id: projectId });
+      if (!kb.ok) return failedWorkflowStep(intent, "构建知识库", kb);
+    }
+    return {
+      ok: true,
+      status: "success",
+      intent,
+      title: "文献采集已开始",
+      message: "已创建文献采集任务，并完成可用步骤的提交。",
+      steps: ["创建文献采集任务", "检索文献", "整理手动下载队列", params.build_kb === false ? "跳过知识库构建" : "构建知识库"],
+      manual_queue_count: manualQueueCount(paperRequests),
+      next_step: "你可以在资料库查看文献和知识条目，手动补充无法开放获取的全文。",
+      technical: { createTask: createTask.data, search: search.data, paperRequests: paperRequests.data, kb: kb?.data },
+    };
+  }
+
+  const coordinator = await runCoordinator(workflowPrompt(intent, params), projectId, context.conversationId || "", context.sessionId || "");
+  if (!coordinator.ok) return workflowNotConnected(intent);
+  return {
+    ok: true,
+    status: "success",
+    intent,
+    title: "任务已开始",
+    message: coordinator.data?.answer || coordinator.data?.message || "已把任务交给 Agent，后续结果会继续显示在对话中。",
+    steps: ["已确认参数", "已提交给 Agent"],
+    next_step: "等待 Agent 返回结果，或继续补充上下文。",
+    technical: coordinator.data,
+  };
+}
 export const queryResearchOsRag = (payload) => apiPost("/research-os/rag/query", payload);
 export const queryResearchContext = (payload) => apiPost("/research-os/research-context/query", payload);
 export const searchResearchOsMemory = (payload) => apiPost("/research-os/memory/search", payload);

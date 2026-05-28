@@ -1,7 +1,7 @@
 # Generated Research Planning
 
 # Purpose
-Plan Research Route completed task_type=research_planning with status=completed.
+SOPGenerationSkill completed task_type=research_planning with status=completed.
 
 # When to Use
 Use when task_type is `research_planning` and the user has approved this generated skill.
@@ -35,5 +35,5 @@ Use when task_type is `research_planning` and the user has approved this generat
 - Human review is required before activation.
 
 # Provenance
-- created_from_skillrun_id: 9c2808b02f12e31c30cd9792
+- created_from_skillrun_id: abb37515933d7f54cba260cf
 - risk_level: medium

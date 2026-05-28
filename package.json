@@ -2,6 +2,7 @@
   "name": "aura-research-client",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Local desktop HTML client for AURA Research.",
   "main": "electron/main.js",
   "scripts": {

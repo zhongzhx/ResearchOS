@@ -1,3 +1,5 @@
+import { displayStatus, displayUserText } from "../ui_text.js";
+
 export function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -9,7 +11,7 @@ export function escapeHtml(value) {
 
 export function text(value, fallback = "暂无数据") {
   if (value === null || value === undefined) return fallback;
-  const normalized = String(value).trim();
+  const normalized = displayUserText(value, "").trim();
   return normalized || fallback;
 }
 
@@ -33,7 +35,7 @@ export function statusTone(status) {
 }
 
 export function badge(label, tone = "muted") {
-  return `<span class="badge ${escapeHtml(tone)}">${escapeHtml(text(label, "未知"))}</span>`;
+  return `<span class="badge ${escapeHtml(tone)}">${escapeHtml(displayStatus(text(label, "未知")))}</span>`;
 }
 
 export function compactPath(value) {

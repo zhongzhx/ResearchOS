@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
-from harvest_utils import (
+from literature_harvest.scripts.harvest_utils import (
     NCBI_BASE,
     RAW_DIR,
     chunked,
@@ -172,14 +172,11 @@ def search_pubmed_and_pmc(config_path: str | None = None) -> pd.DataFrame:
 
     if config["sources"].get("pubmed", True):
         for query in queries:
-            search_query = query["query"]
-            if config.get("open_access_only", True) and "free full text" not in search_query.lower():
-                search_query = f"({search_query}) AND free full text[sb]"
             esearch_json = request_json(
                 f"{NCBI_BASE}/esearch.fcgi",
                 params={
                     "db": "pubmed",
-                    "term": search_query,
+                    "term": query["query"],
                     "retmax": max_results.get("pubmed", 100),
                     "retmode": "json",
                     "tool": tool_name,
@@ -192,7 +189,7 @@ def search_pubmed_and_pmc(config_path: str | None = None) -> pd.DataFrame:
             logs.append(
                 {
                     "query_name": query["name"],
-                    "search_query": search_query,
+                    "search_query": query["query"],
                     "db": "pubmed",
                     "retrieved_id_count": len(id_list),
                 }
@@ -209,7 +206,7 @@ def search_pubmed_and_pmc(config_path: str | None = None) -> pd.DataFrame:
                     },
                     delay_seconds=delays.get("pubmed", 0.34),
                 )
-                rows.extend(parse_pubmed_xml(xml_text, query["name"], search_query))
+                rows.extend(parse_pubmed_xml(xml_text, query["name"], query["query"]))
 
     if config["sources"].get("pmc", True):
         for query in queries:

@@ -88,6 +88,27 @@ class ResearchOSProjectIsolationContextTests(unittest.TestCase):
         self.assertEqual({entry["project_id"] for entry in memory["entries"]}, {self.project_a["id"]})
         self.assertEqual({context["project_id"] for context in data_contexts}, {self.project_a["id"]})
 
+    def test_library_reads_require_a_project_scope(self) -> None:
+        ros.create_paper_request(
+            self.agent_root,
+            {"project_id": self.project_a["id"], "title": "Alpha manual paper", "reason": "manual download"},
+        )
+
+        for reader in [
+            ros.list_files,
+            ros.list_references,
+            ros.list_knowledge_base_entries,
+            ros.list_paper_requests,
+        ]:
+            with self.subTest(reader=reader.__name__):
+                with self.assertRaisesRegex(ValueError, "project_id is required"):
+                    reader(self.agent_root)
+
+        self.assertEqual({item["project_id"] for item in ros.list_files(self.agent_root, self.project_a["id"])}, {self.project_a["id"]})
+        self.assertEqual({item["project_id"] for item in ros.list_references(self.agent_root, self.project_a["id"])}, {self.project_a["id"]})
+        self.assertEqual({item["project_id"] for item in ros.list_knowledge_base_entries(self.agent_root, self.project_a["id"])}, {self.project_a["id"]})
+        self.assertEqual({item["project_id"] for item in ros.list_paper_requests(self.agent_root, self.project_a["id"])}, {self.project_a["id"]})
+
     def test_archived_project_is_not_in_active_retrieval_context(self) -> None:
         state = ros.workspace_state(self.agent_root, self.project_a["id"])
         candidates = state["workspace_diagnostics"]["possible_misassigned_literature"]

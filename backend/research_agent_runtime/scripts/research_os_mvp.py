@@ -5110,10 +5110,13 @@ def normalize_file_registry_row(agent_root: Path, row: dict[str, Any] | None) ->
 
 
 def list_files(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
     rows = conn.execute(
-        "SELECT * FROM research_files WHERE (?='' OR project_id=?) ORDER BY imported_at DESC",
-        (project_id, project_id),
+        "SELECT * FROM research_files WHERE project_id=? ORDER BY imported_at DESC",
+        (project_id,),
     ).fetchall()
     conn.close()
     return [normalize_file_registry_row(agent_root, row) for row in rows_to_dicts(rows)]
@@ -8949,11 +8952,11 @@ def write_article_keyword_outputs(run_root: Path, analyses: list[dict[str, Any]]
 
 
 def list_references(agent_root: Path, project_id: str = "", search: str = "", limit: int = 100) -> list[dict[str, Any]]:
-    clauses = ["1=1"]
-    params: list[Any] = []
-    if project_id:
-        clauses.append("project_id=?")
-        params.append(project_id)
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    clauses = ["project_id=?"]
+    params: list[Any] = [project_id]
     if search:
         clauses.append("(title LIKE ? OR abstract LIKE ? OR doi LIKE ?)")
         pattern = f"%{search}%"
@@ -9639,11 +9642,11 @@ def list_paper_requests(
     status: str = "",
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    clauses = ["1=1"]
-    params: list[Any] = []
-    if project_id:
-        clauses.append("project_id=?")
-        params.append(project_id)
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    clauses = ["project_id=?"]
+    params: list[Any] = [project_id]
     if task_id:
         clauses.append("task_id=?")
         params.append(task_id)
@@ -9667,7 +9670,10 @@ def _update_paper_request(agent_root: Path, request_id: str, patch: dict[str, An
         assignments.append(f"{key}=?")
         values.append(normalize_paper_access_status(value) if key == "access_status" else clean(value))
     if not assignments:
-        return list_paper_requests(agent_root, limit=1)[0]
+        conn = connect(agent_root)
+        saved = row_to_dict(conn.execute("SELECT * FROM paper_requests WHERE request_id=?", (request_id,)).fetchone()) or {}
+        conn.close()
+        return saved
     assignments.append("updated_at=?")
     values.extend([now(), request_id])
     conn = connect(agent_root)
@@ -10002,6 +10008,18 @@ def literature_ingest_summary(items: list[dict[str, Any]], candidate_count: int 
     }
 
 
+LITERATURE_PDF_DOWNLOAD_SUCCESS_STATUSES = {
+    "success",
+    "oa_pdf_downloaded",
+    "institution_pdf_downloaded",
+    "browser_pdf_downloaded",
+}
+
+
+def is_literature_pdf_download_success(status: Any) -> bool:
+    return clean(status) in LITERATURE_PDF_DOWNLOAD_SUCCESS_STATUSES
+
+
 def _reference_rows_by_ids(agent_root: Path, reference_ids: list[str]) -> list[dict[str, Any]]:
     ids = [clean(item) for item in reference_ids if clean(item)]
     if not ids:
@@ -10125,7 +10143,7 @@ def incremental_ingest_literature_downloads(
             continue
         content_format = clean(log_row.get("content_format")) or ("pdf" if clean(log_row.get("final_pdf_path")).lower().endswith(".pdf") else "")
         status = clean(log_row.get("download_status"))
-        if status != "success" or content_format != "pdf":
+        if not is_literature_pdf_download_success(status) or content_format != "pdf":
             if status in {"inaccessible", "broken_link", "rate_limited", "metadata_only"} and record_id not in existing:
                 candidate_row = candidate_by_id.get(record_id, {})
                 upsert_literature_ingest_item(
@@ -10237,7 +10255,7 @@ def collect_keyword_harvest_progress(agent_root: Path, task_id: str) -> dict[str
     pdf_count = 0
     fulltext_count = 0
     for record_id, log_row in latest_logs.items():
-        if clean(log_row.get("download_status")) != "success":
+        if not is_literature_pdf_download_success(log_row.get("download_status")):
             continue
         final_path = clean(log_row.get("final_pdf_path"))
         title = clean(candidate_by_id.get(record_id, {}).get("title"))
@@ -10334,7 +10352,7 @@ def import_keyword_harvest_outputs(agent_root: Path, payload: dict[str, Any]) ->
                 rows_to_import.append(candidate)
     else:
         for record_id, log_row in latest_logs.items():
-            if clean(log_row.get("download_status")) != "success":
+            if not is_literature_pdf_download_success(log_row.get("download_status")):
                 continue
             final_path = clean(log_row.get("final_pdf_path"))
             content_format = clean(log_row.get("content_format")) or ("pdf" if final_path.lower().endswith(".pdf") else "")
@@ -10853,11 +10871,11 @@ def build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict
 
 
 def list_knowledge_base_entries(agent_root: Path, project_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
-    clauses = ["1=1"]
-    params: list[Any] = []
-    if project_id:
-        clauses.append("project_id=?")
-        params.append(project_id)
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    clauses = ["project_id=?"]
+    params: list[Any] = [project_id]
     params.append(int(limit or 100))
     conn = connect(agent_root)
     rows = rows_to_dicts(conn.execute(f"SELECT * FROM knowledge_base_entries WHERE {' AND '.join(clauses)} ORDER BY updated_at DESC LIMIT ?", params).fetchall())
@@ -13263,6 +13281,8 @@ def infer_agent_intent(message: str, previous_intent: str = "") -> str:
 
 def task_type_for_agent_intent(intent: str, message: str) -> str:
     lower = message.lower()
+    if is_experiment_plan_request(message):
+        return "experiment_matrix_design"
     if intent in {"kb_query", "start_skill_request"}:
         return "weekly_literature_digest" if any(term in lower for term in ["周报", "digest", "推送"]) else "literature_mining"
     if intent == "skill_learning_request":
@@ -16519,7 +16539,6 @@ def should_use_llm_for_ordinary_chat(message: str, intent: str = "", canonical_i
         "当前系统正常吗",
         "介绍一下当前项目",
         "介绍当前项目",
-        "你有什么功能",
     }
     if compact in exact:
         return True
@@ -16543,6 +16562,49 @@ def should_use_llm_for_ordinary_chat(message: str, intent: str = "", canonical_i
     if lower.strip(" ?!.") in english_terms:
         return True
     return False
+
+
+def is_experiment_plan_request(message: str) -> bool:
+    text = clean(message)
+    lower = text.lower()
+    return any(term in lower for term in ["raw264.7", "实验方案", "设计实验", "实验设计", "experiment plan", "design experiment"])
+
+
+def experiment_plan_output_schema() -> dict[str, Any]:
+    return {
+        "answer": "使用中文 Markdown 输出，必须按顺序包含二级标题：实验名称、实验目的、实验试剂、实验模型、实验步骤。实验步骤使用编号列表；缺少的信息要写明待用户补充，不要输出确认按钮、任务状态或内部 skill 执行信息。",
+        "sources": "array",
+        "validation_status": "passed|warning|failed",
+    }
+
+
+def format_experiment_plan_fallback(message: str) -> str:
+    goal = clean(message) or "待补充研究目标"
+    model = "RAW264.7 细胞" if "raw264.7" in goal.lower() else "待补充实验模型"
+    return "\n".join(
+        [
+            "## 实验名称",
+            f"{model} 实验方案草案",
+            "",
+            "## 实验目的",
+            goal,
+            "",
+            "## 实验试剂",
+            "- 待补充干预物或样品",
+            "- 细胞培养基、血清、抗生素等基础培养试剂",
+            "- 根据检测指标补充 qPCR、ELISA、WB 或其他检测试剂",
+            "",
+            "## 实验模型",
+            model,
+            "",
+            "## 实验步骤",
+            "1. 明确实验分组、样本量、处理时间和检测终点。",
+            "2. 按细胞状态和密度接种细胞，设置空白、模型、阳性或溶剂对照。",
+            "3. 加入干预物或刺激条件，并记录批次、浓度、时间和细胞状态。",
+            "4. 按计划采集样本，完成目标指标检测。",
+            "5. 汇总原始数据，检查重复数、异常值和质控结果后再做结论。",
+        ]
+    )
 
 
 def should_include_full_task_status(payload: dict[str, Any], message: str, intent: str) -> bool:
@@ -16625,7 +16687,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     intent = "conversation_history_query" if is_conversation_history_query(message) else infer_agent_intent(message, previous_intent)
     if clean(payload.get("intent")) == "refresh_task_status":
         intent = "task_status_query"
-    force_ordinary_llm_chat = should_use_llm_for_ordinary_chat(message, intent, canonical_intent)
+    force_ordinary_llm_chat = payload_truthy(payload.get("_force_ordinary_llm_chat")) or should_use_llm_for_ordinary_chat(message, intent, canonical_intent)
     include_full_task_status = False if force_ordinary_llm_chat else should_include_full_task_status(payload, message, intent)
     detected_literature_keywords = extract_literature_keywords_from_message(message)
     last_literature_keywords = latest_literature_keywords_from_history(history_before)
@@ -17646,6 +17708,15 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         }
         for item in citations[:8]
     ]
+    chat_task_type = clean(payload.get("task_type")) or task_type_for_agent_intent(intent, message)
+    experiment_plan_requested = chat_task_type == "experiment_matrix_design" or is_experiment_plan_request(message)
+    experiment_plan_instruction = (
+        "实验方案输出要求：如果用户是在请求实验方案，必须直接输出排版好的方案，不要先要求确认。"
+        "答案必须按顺序包含 Markdown 二级标题：实验名称、实验目的、实验试剂、实验模型、实验步骤；"
+        "实验步骤使用编号列表；缺失参数用“待补充”说明。"
+        if experiment_plan_requested
+        else ""
+    )
 
     prompt = "\n\n".join(
         [
@@ -17664,12 +17735,12 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "引用规则：如果使用了给定证据，在关键结论后用上标数字标注，例如 ¹ ² ³。不要在正文里输出 chunk id、reference_id、document_id、完整来源列表或“来源：...”段落；结构化 citations 会由后端返回。没有证据支持的通用知识不要伪造引用。",
             "可用 citation objects：",
             json_dumps(citation_objects_for_answer),
+            experiment_plan_instruction,
             "如果用户问文献总结、数据库里有什么、这些文献怎么做的，必须优先基于 Workspace State 中的 references/chunks/KB 统计和 Research Context Compiler 的文献片段回答；如果 PDF 多但入库少，要明确说明覆盖范围。请输出中文回答，并明确区分本项目实验数据、文献证据和通用科研知识。默认最多 3 个短段落，不要输出系统架构、技能全集、内部规则或调试信息。",
         ]
     )
     llm = LLMAdapter(prompt_language=payload.get("prompt_language") or "zh", prompt_policy="backend_llm_guardrails")
     conn = connect(agent_root)
-    chat_task_type = clean(payload.get("task_type")) or task_type_for_agent_intent(intent, message)
     chat_skill_name = clean(payload.get("skill_name")) or preferred_skill_name_for_task(chat_task_type)
     runtime_prompt = prompt_router.compose_runtime_prompt(
         conn,
@@ -17688,7 +17759,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "sources": citation_objects_for_answer,
             "context_warnings": [clean(item) for item in context_bundle.get("warnings", [])],
         },
-        output_schema={"answer": "string", "sources": "array", "validation_status": "passed|warning|failed"},
+        output_schema=experiment_plan_output_schema() if experiment_plan_requested else {"answer": "string", "sources": "array", "validation_status": "passed|warning|failed"},
     )
     conn.close()
     system_prompt = runtime_prompt["system_prompt"] + "\n\n" + AGENT_RESPONSE_CONSTRAINT_ZH + "\n" + AGENT_RESPONSE_CONSTRAINT_EN
@@ -17699,7 +17770,12 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     llm_output_used = True
     answer_overwritten_after_llm = False
     fallback_reason: str | None = None
-    if not answer:
+    if not answer and experiment_plan_requested:
+        answer = format_experiment_plan_fallback(message)
+        answer_source = "template"
+        llm_output_used = False
+        fallback_reason = "empty_llm_output_experiment_plan_template"
+    elif not answer:
         answer = "未获得模型回答。请检查后端 LLM 环境变量或本地服务状态。"
         answer_source = "fallback"
         llm_output_used = False
