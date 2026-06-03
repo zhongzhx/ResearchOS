@@ -41,7 +41,7 @@ class EpisodicMemoryStoreTests(unittest.TestCase):
     def test_skillrun_payload_generates_episode_and_searches(self) -> None:
         run = {"id": "sr2", "project_id": "p1", "skill_id": "skill-a", "skill_name": "Skill A", "status": "completed", "input_payload": {"task_id": "t2", "user_query": "write report"}, "output_payload": {"summary": "report ready"}}
         episode = create_episode_from_skillrun("sr2", skillrun=run)
-        linked = link_episode_to_memory_items(episode["episode_id"], ["mem1"])
+        linked = link_episode_to_memory_items(episode["episode_id"], ["mem1"], project_id="p1")
 
         self.assertEqual(linked["memory_ids"], ["mem1"])
         self.assertTrue(search_episodes("p1", "report"))

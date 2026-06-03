@@ -1,4 +1,4 @@
-import { WORKFLOW_OUTPUT_ARTIFACTS, createArtifactsForWorkflowResult, saveWorkflowArtifacts as saveArtifactsToProject } from "./artifact_types.js";
+import { WORKFLOW_OUTPUT_ARTIFACTS, saveWorkflowArtifacts as saveArtifactsToProject } from "./artifact_types.js";
 
 const WORKFLOW_HISTORY_PREFIX = "researchos.workflowHistory.v1.";
 const CONFIRM_WORDS = ["好", "可以", "开始", "确认", "执行", "就按这个", "没问题"];
@@ -66,7 +66,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将精读“{source}”，输出中文结构化解读，并解释关键图表。",
     user_visible_steps: ["确认论文", "提取研究问题", "拆解方法与结果", "解释图表", "整理局限与可复用点"],
     execution_strategy: "needs_file",
-    current_status: "needs_file",
+    current_status: "executable",
     output_types: ["中文精读", "图表解释", "方法要点"],
     save_to_project: true,
     developer_notes: "Needs a selected paper or uploaded PDF. Keep output at product artifact level.",
@@ -82,7 +82,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将为“{claim}”寻找可支撑引用，并说明每条引用适合支撑的位置。",
     user_visible_steps: ["确认论点", "检索候选文献", "匹配支撑关系", "整理引用建议"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["引用建议", "支撑理由", "候选文献"],
     save_to_project: true,
     developer_notes: "Plan-only until citation grounding service is connected.",
@@ -98,7 +98,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将把“{source}”整理成 {slide_count} 页中文组会 PPT，并附讲稿备注。",
     user_visible_steps: ["确认材料", "抽取汇报主线", "生成幻灯片大纲", "补充讲稿备注"],
     execution_strategy: "needs_file",
-    current_status: "needs_file",
+    current_status: "executable",
     output_types: ["PPT 大纲", "讲稿备注", "汇报重点"],
     save_to_project: true,
     developer_notes: "Needs PDF or library file selection before deck generation can run.",
@@ -130,7 +130,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将把“{source}”整理成可执行 SOP。",
     user_visible_steps: ["确认来源材料", "提取关键步骤", "整理 SOP", "列出质控点"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["SOP", "质控点", "材料清单"],
     save_to_project: true,
     developer_notes: "Plan-only until SOP extraction is connected to a stable user workflow endpoint.",
@@ -146,7 +146,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将根据“{failure_description}”做失败复盘。",
     user_visible_steps: ["确认失败现象", "梳理已排查条件", "排列可能原因", "给出下一步排查方案"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["原因假设", "排查计划", "风险提示"],
     save_to_project: true,
     developer_notes: "Plan-only until a stable failure recovery route is available.",
@@ -194,7 +194,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将根据“{analysis_goal}”分析表格“{file_id}”。",
     user_visible_steps: ["选择数据表", "确认分析目标", "检查变量", "生成分析计划"],
     execution_strategy: "needs_file",
-    current_status: "needs_file",
+    current_status: "executable",
     output_types: ["分析计划", "图表建议", "结果解释"],
     save_to_project: true,
     developer_notes: "Data execution is not fully connected; do not report fake statistical completion.",
@@ -209,11 +209,11 @@ export const WORKFLOW_DEFINITIONS = {
     default_params: {},
     confirmation_template: "我将按 {assay_type} 数据类型分析“{file_id}”。",
     user_visible_steps: ["选择数据文件", "确认实验类型", "规划统计比较", "生成图表方案"],
-    execution_strategy: "needs_file",
-    current_status: "needs_file",
+    execution_strategy: "coding_runtime",
+    current_status: "executable",
     output_types: ["统计方案", "图表建议", "结果解释"],
     save_to_project: true,
-    developer_notes: "Requires data parser and assay-specific normalization before execution.",
+    developer_notes: "qPCR uses CodingRuntimeService qpcr_template. ELISA and CCK-8 currently fall back to a generic project-scoped data profile until assay-specific normalization is connected.",
   },
   metabolomics_interpretation: {
     intent: "metabolomics_interpretation",
@@ -236,13 +236,13 @@ export const WORKFLOW_DEFINITIONS = {
     user_title: "生成论文图表",
     user_description: "把数据或结果描述整理成论文图表方案和绘图规格。",
     group: "分析数据",
-    required_params: ["figure_goal"],
-    optional_params: ["output_format", "style", "data_source"],
+    required_params: ["file_id", "group_column", "value_column", "figure_goal"],
+    optional_params: ["output_format", "style"],
     default_params: { output_format: "svg", style: "publication" },
     confirmation_template: "我将按“{figure_goal}”生成论文图表方案，默认输出 {output_format}。",
     user_visible_steps: ["确认图表目标", "选择图表类型", "规划版式与标注", "生成绘图规格"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["图表方案", "绘图规格", "SVG"],
     save_to_project: true,
     developer_notes: "Plan-only until chart rendering is connected in this client.",
@@ -290,7 +290,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将润色你提供的英文文本，并保留原意、检查过度表述。",
     user_visible_steps: ["读取原文", "润色语言", "检查过度表述", "输出修改说明"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["润色稿", "修改说明", "风险提示"],
     save_to_project: false,
     developer_notes: "Plan-only in workspace; chat may later provide direct text polishing.",
@@ -322,7 +322,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将根据审稿意见生成逐条回复，并要求映射修改动作和修改位置。",
     user_visible_steps: ["拆解审稿意见", "匹配修改动作", "标注修改位置", "生成回复草稿"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["回复信草稿", "修改动作表", "修改位置清单"],
     save_to_project: true,
     developer_notes: "Plan-only until document-aware revision tracking is connected.",
@@ -348,13 +348,13 @@ export const WORKFLOW_DEFINITIONS = {
     user_title: "项目周报",
     user_description: "汇总项目进展、问题、风险和下周计划。",
     group: "写论文",
-    required_params: ["project_id"],
+    required_params: ["current_progress"],
     optional_params: ["time_range", "focus"],
     default_params: { time_range: "recent" },
     confirmation_template: "我将汇总当前项目的最近进展并生成周报。",
     user_visible_steps: ["确认项目", "汇总最近记录", "整理风险和阻塞", "生成周报"],
     execution_strategy: "plan_only",
-    current_status: "plan_only",
+    current_status: "executable",
     output_types: ["项目周报", "风险清单", "下周计划"],
     save_to_project: true,
     developer_notes: "Plan-only in this controller unless weekly report persistence is wired later.",
@@ -370,7 +370,7 @@ export const WORKFLOW_DEFINITIONS = {
     confirmation_template: "我将根据“{analysis_goal}”分析表格“{file_id}”。",
     user_visible_steps: ["选择数据表", "确认分析目标", "检查变量", "生成分析计划"],
     execution_strategy: "needs_file",
-    current_status: "needs_file",
+    current_status: "executable",
     output_types: ["分析计划", "图表建议", "结果解释"],
     save_to_project: true,
     developer_notes: "Backward-compatible alias for table_analysis.",
@@ -392,6 +392,27 @@ export const WORKFLOW_DEFINITIONS = {
     developer_notes: "Backward-compatible alias for manuscript_section_writing.",
   },
 };
+
+const BACKEND_WORKFLOW_INTENTS = {
+  citation_finder: "citation_support",
+  paper_reader: "paper_deep_reading",
+  paper_to_ppt: "nature_paper_to_ppt",
+  experiment_design: "experiment_design",
+  protocol_to_sop: "protocol_to_sop",
+  failure_recovery: "failure_recovery",
+  table_analysis: "scientific_data_analysis",
+  qpcr_elisa_cck8_analysis: "scientific_data_analysis",
+  data_analysis: "scientific_data_analysis",
+  figure_generation: "nature_figure_generation",
+  english_polishing: "nature_academic_polishing",
+  reviewer_response: "nature_reviewer_response",
+  weekly_report: "weekly_report",
+  data_availability_statement: "nature_data_availability",
+};
+
+export function backendIntentForWorkflow(intent) {
+  return BACKEND_WORKFLOW_INTENTS[intent] || "";
+}
 
 Object.entries(WORKFLOW_DEFINITIONS).forEach(([intent, definition]) => {
   definition.output_artifacts = WORKFLOW_OUTPUT_ARTIFACTS[intent] || ["data_analysis_report"];
@@ -439,12 +460,18 @@ function compactId(value) {
     .replace(/^-+|-+$/g, "");
 }
 
+function requireProjectId(projectId) {
+  const normalized = normalize(projectId);
+  if (!normalized) throw new Error("project_id is required");
+  return normalized;
+}
+
 function workflowId(intent) {
   return `workflow-${compactId(intent) || "task"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function historyKey(projectId) {
-  return `${WORKFLOW_HISTORY_PREFIX}${compactId(projectId) || "default"}`;
+  return `${WORKFLOW_HISTORY_PREFIX}${compactId(requireProjectId(projectId))}`;
 }
 
 function readJson(key, fallback) {
@@ -557,7 +584,6 @@ export function validateWorkflowParams(intent, params = {}) {
   const normalized = normalizeWorkflowParams(intent, params, {});
   for (const key of definition.required_params) {
     if (key === "file_id" && (normalized.uploaded_file || normalized.file || normalized.source)) continue;
-    if (key === "project_id" && normalized.project_id === "default") continue;
     if (!normalize(normalized[key])) missing.push(key);
   }
   missing.forEach((key) => questions.push(QUESTION_BY_PARAM[key] || "请补充执行这个任务所需的关键信息。"));
@@ -761,7 +787,7 @@ function manualQueueCount(result) {
 
 async function executeLiteratureWorkflow(draft, api) {
   const params = normalizeWorkflowParams(draft.intent, draft.params, draft.context || {});
-  const projectId = params.project_id || draft.context?.projectId || "default";
+  const projectId = requireProjectId(params.project_id || draft.context?.projectId);
   const payload = {
     project_id: projectId,
     query: params.query,
@@ -853,28 +879,6 @@ async function executePlanOnlyWorkflow(draft, api, options = {}) {
       technical: { execution_strategy: definition.execution_strategy, developer_notes: definition.developer_notes },
     };
   }
-  if (draft.intent === "experiment_design" && api?.runCoordinator) {
-    const prompt = [
-      `请根据用户确认的科研任务生成方案：${definition.user_title}`,
-      ...Object.entries(draft.params || {}).map(([key, value]) => `${key}: ${value}`),
-      "请用中文输出方案，不要声称已经运行内部调试对象。",
-    ].join("\n");
-    const coordinator = await api.runCoordinator(prompt, draft.params?.project_id || options.projectId || "default", options.conversationId || "", options.sessionId || "");
-    if (coordinator?.ok) {
-      return {
-        ok: true,
-        status: "completed",
-        intent: draft.intent,
-        title: definition.user_title,
-        message: coordinator.data?.answer || coordinator.data?.message || "已生成实验方案。",
-        steps: plan.steps,
-        current_step: "已完成",
-        next_step: "请根据方案确认分组、样本量和关键质控点。",
-        result_summary: "已生成实验设计方案。",
-        technical: coordinator.data,
-      };
-    }
-  }
   return {
     ok: true,
     status: "plan_only",
@@ -886,6 +890,55 @@ async function executePlanOnlyWorkflow(draft, api, options = {}) {
     next_step: "现在可以按计划准备材料；真实执行入口接入后可继续执行。",
     result_summary: "已生成工作流计划。",
     technical: { execution_strategy: definition.execution_strategy, plan_only: true, developer_notes: definition.developer_notes },
+  };
+}
+
+function backendWorkflowParams(draft) {
+  const params = { ...(draft.params || {}) };
+  const intent = BACKEND_WORKFLOW_INTENTS[draft.intent];
+  if (draft.intent === "citation_finder") params.claim = params.claim || params.text;
+  if (draft.intent === "paper_reader") params.paper_text = params.paper_text || params.source;
+  if (draft.intent === "paper_to_ppt") params.paper_text = params.paper_text || params.source;
+  if (draft.intent === "experiment_design") params.objective = params.objective || params.research_goal;
+  if (draft.intent === "protocol_to_sop") params.method_text = params.method_text || params.source;
+  if (["table_analysis", "data_analysis"].includes(draft.intent)) params.artifact_id = params.artifact_id || params.file_id;
+  if (draft.intent === "qpcr_elisa_cck8_analysis") {
+    params.artifact_id = params.artifact_id || params.file_id;
+    if (String(params.assay_type || "").toLowerCase() === "qpcr") params.runtime_template = "qpcr_template";
+  }
+  if (draft.intent === "figure_generation") {
+    params.artifact_id = params.artifact_id || params.file_id;
+    params.x = params.x || params.group_column;
+    params.y = params.y || params.value_column;
+  }
+  if (draft.intent === "reviewer_response") params.reviewer_comments = params.reviewer_comments || params.review_comments;
+  if (draft.intent === "data_availability_statement") params.dataset_inventory = params.dataset_inventory || params.inventory;
+  return { intent, params };
+}
+
+async function executeRealBackendWorkflow(draft, api, options = {}) {
+  const backend = backendWorkflowParams(draft);
+  if (!backend.intent || typeof api?.executeWorkflowExecution !== "function") return null;
+  const projectId = requireProjectId(draft.params?.project_id || options.projectId || draft.context?.projectId);
+  const response = await api.executeWorkflowExecution({
+    project_id: projectId,
+    intent: backend.intent,
+    params: backend.params,
+    conversation_id: options.conversationId || draft.linked_conversation_id || "",
+  });
+  const result = response?.data || {};
+  if (response?.ok && result.ok) return result;
+  return {
+    ok: false,
+    status: result.status || "failed",
+    intent: backend.intent,
+    title: result.title || draft.title,
+    message: result.message || response?.error || "后端未返回可验证的执行结果。",
+    run_id: result.run_id || "",
+    artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
+    current_step: result.status || "failed",
+    next_step: result.next_step || "请检查所需材料后重试。",
+    technical: result.developer_diagnostics || result,
   };
 }
 
@@ -918,25 +971,13 @@ export async function executeWorkflow(draft, api, options = {}) {
     };
   }
   if (draft.intent === "literature_harvest_and_kb") return executeLiteratureWorkflow(draft, api);
+  const realResult = await executeRealBackendWorkflow(draft, api, options);
+  if (realResult) return realResult;
   return executePlanOnlyWorkflow(draft, api, options);
 }
 
 export function formatWorkflowResult(result, { developerMode = false } = {}) {
-  const definition = WORKFLOW_DEFINITIONS[result?.intent] || {};
-  const artifacts =
-    Array.isArray(result?.artifacts) && result.artifacts.length
-      ? result.artifacts
-      : createArtifactsForWorkflowResult(
-          {
-            workflow_id: result?.workflow_id || result?.intent || "workflow",
-            intent: result?.intent || "",
-            title: result?.title || definition.user_title,
-            params: result?.params || {},
-            output_artifacts: definition.output_artifacts || [],
-          },
-          result || {},
-          { projectId: result?.project_id || result?.params?.project_id || "default" },
-        );
+  const artifacts = Array.isArray(result?.artifacts) ? result.artifacts : [];
   const clean = {
     ok: Boolean(result?.ok),
     status: result?.status || "failed",
@@ -948,9 +989,12 @@ export function formatWorkflowResult(result, { developerMode = false } = {}) {
     next_step: result?.next_step || "",
     manual_queue_count: result?.manual_queue_count || 0,
     result_summary: resultSummary(result),
+    run_id: result?.run_id || "",
+    project_id: result?.project_id || "",
     artifacts,
   };
   if (developerMode && result?.technical) clean.technical = result.technical;
+  else if (developerMode && result?.developer_diagnostics) clean.technical = result.developer_diagnostics;
   return clean;
 }
 

@@ -28,7 +28,8 @@ HIDDEN_PATTERNS = ["system prompt", "hidden polic", "internal tool instruction",
 
 
 def brain_root() -> Path:
-    return Path(os.environ.get("RESEARCH_BRAIN_ROOT") or Path.cwd() / "data" / "research_brain")
+    agent_data_dir = os.environ.get("RESEARCHOS_AGENT_DATA_DIR")
+    return Path(os.environ.get("RESEARCH_BRAIN_ROOT") or (Path(agent_data_dir) / "research_brain" if agent_data_dir else Path.cwd() / "data" / "research_brain"))
 
 
 def now_iso() -> str:

@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import research_agent_api as api  # noqa: E402
+import research_os_mvp as ros  # noqa: E402
 
 
 class StandardHttpProductRoutesTests(unittest.TestCase):
@@ -31,6 +32,7 @@ class StandardHttpProductRoutesTests(unittest.TestCase):
         os.environ["RESEARCHOS_AGENT_ROOT"] = str(self.tmp / "agent_data")
         os.environ["RESEARCHOS_AGENT_DATA_DIR"] = str(self.tmp / "agent_data")
         api.CONFIG = api.RuntimeConfig(self.tmp / "agent_data")
+        self.project = ros.create_project(api.CONFIG.agent_root, {"id": "product-project", "title": "Product Project"})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -58,8 +60,11 @@ class StandardHttpProductRoutesTests(unittest.TestCase):
 
     def _post_json(self, path: str, payload: dict) -> tuple[int, dict]:
         request = urllib.request.Request(self.base_url + path, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
 
     def test_product_api_disabled_returns_disabled_json(self) -> None:
         os.environ["RESEARCHOS_PRODUCT_API_ENABLED"] = "false"
@@ -74,11 +79,14 @@ class StandardHttpProductRoutesTests(unittest.TestCase):
         os.environ["RESEARCHOS_PRODUCT_API_ENABLED"] = "true"
 
         status, features = self._get_json("/api/product/features")
-        run_status, run = self._post_json("/api/product/features/data_analysis_workflow/run", {"inline_csv": "group,value\ncontrol,1\nstim,2\n"})
-        demo_status, demo = self._post_json("/api/product/features/dual_agent_research_task/demo", {"project_id": "demo_project"})
+        missing_status, missing = self._post_json("/api/product/features/data_analysis_workflow/run", {"inline_csv": "group,value\ncontrol,1\nstim,2\n"})
+        run_status, run = self._post_json("/api/product/features/data_analysis_workflow/run", {"project_id": self.project["id"], "inline_csv": "group,value\ncontrol,1\nstim,2\n"})
+        demo_status, demo = self._post_json("/api/product/features/dual_agent_research_task/demo", {"project_id": self.project["id"]})
 
         self.assertEqual(status, 200)
         self.assertEqual(features["count"], 8)
+        self.assertEqual(missing_status, 400)
+        self.assertEqual(missing["error"], "project_id is required")
         self.assertEqual(run_status, 200)
         self.assertTrue(run["ok"])
         self.assertEqual(run["status"], "partial")

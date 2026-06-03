@@ -75,6 +75,14 @@ class StandardHttpMemoryRoutesTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("results", result)
 
+    def test_memory_search_enabled_requires_project_id(self) -> None:
+        os.environ["RESEARCHOS_MEMORYOS_ENABLED"] = "true"
+
+        status, result = self._post_json("/api/memory/search", {"query": "x"})
+
+        self.assertEqual(status, 400)
+        self.assertIn("project_id is required", result["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

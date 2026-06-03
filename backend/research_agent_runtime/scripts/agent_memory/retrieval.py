@@ -136,8 +136,14 @@ def retrieve_memory(
 
 
 def list_project_memory(agent_root: Path, project_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
     return retrieve_memory(agent_root, user_id="", project_id=project_id, include_archived=include_archived, max_results=200)
 
 
-def list_experiment_memory(agent_root: Path, experiment_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
-    return retrieve_memory(agent_root, user_id="", experiment_id=experiment_id, include_archived=include_archived, max_results=200)
+def list_experiment_memory(agent_root: Path, experiment_id: str, project_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
+    return retrieve_memory(agent_root, user_id="", project_id=project_id, experiment_id=experiment_id, include_archived=include_archived, max_results=200)

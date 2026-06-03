@@ -14,11 +14,11 @@ def _rows(conn: Any, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
 
 
 def consolidate_memory(agent_root: Path, user_id: str, group_id: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    if project_id:
-        projects = _rows(conn, "SELECT * FROM projects WHERE id=?", (project_id,))
-    else:
-        projects = _rows(conn, "SELECT * FROM projects WHERE (?='' OR group_id=?) ORDER BY updated_at DESC", (group_id or "", group_id or ""))
+    projects = _rows(conn, "SELECT * FROM projects WHERE id=?", (project_id,))
 
     views = []
     for project in projects:

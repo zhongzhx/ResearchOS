@@ -239,7 +239,7 @@ class ChatHistoryPersistenceTests(unittest.TestCase):
 
         self.assertIn("sendLegacyChat(prompt, activeProjectId, conversationId, sessionId)", chat)
         self.assertIn('apiPost("/research-os/agent/chat"', api)
-        self.assertIn("const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID)", send_legacy.group(0))
+        self.assertIn("const safeProjectId = requireProjectId(projectId)", send_legacy.group(0))
         self.assertIn("project_id: safeProjectId", send_legacy.group(0))
 
 

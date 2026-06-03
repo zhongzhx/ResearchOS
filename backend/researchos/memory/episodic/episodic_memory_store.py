@@ -11,8 +11,15 @@ from backend.researchos.memory.memory_config import append_jsonl, ensure_memoryo
 from backend.researchos.tasks.task_state_store import default_task_root
 
 
+def _require_project_id(project_id: str | None) -> str:
+    value = str(project_id or "").strip()
+    if not value:
+        raise ValueError("project_id is required")
+    return value
+
+
 def _path(project_id: str) -> Path:
-    return ensure_memoryos_dirs()["episodic"] / safe_project_id(project_id) / "episodes.jsonl"
+    return ensure_memoryos_dirs()["episodic"] / safe_project_id(_require_project_id(project_id)) / "episodes.jsonl"
 
 
 def _parse_json_field(row: dict[str, Any], key: str) -> Any:
@@ -35,13 +42,13 @@ def _upsert_episode(project_id: str, episode: dict[str, Any]) -> dict[str, Any]:
     return episode
 
 
-def create_episode_from_task(task_id: str) -> dict[str, Any]:
-    task_dir = default_task_root() / task_id
+def create_episode_from_task(task_id: str, project_id: str = "", task_dir: Path | None = None) -> dict[str, Any]:
+    task_dir = Path(task_dir) if task_dir else default_task_root() / task_id
     task = read_json(task_dir / "task.json", {"task_id": task_id, "project_id": "", "user_query": ""})
     execution = read_json(task_dir / "execution_result.json", {})
     validation = read_json(task_dir / "validation_report.json", {})
     artifacts = read_json(task_dir / "artifacts.json", [])
-    project_id = str(task.get("project_id") or execution.get("project_id") or "global")
+    project_id = _require_project_id(project_id or task.get("project_id") or execution.get("project_id"))
     status = str(execution.get("status") or task.get("status") or "")
     outcome = "failed" if status == "failed" else ("partial_success" if status == "partial_success" else "success")
     unresolved = list(execution.get("unresolved_items") or [])
@@ -78,7 +85,7 @@ def create_episode_from_skillrun(skillrun_id: str, skillrun: dict[str, Any] | No
     output_payload = _parse_json_field(run, "output_payload")
     output_refs = _parse_json_field(run, "output_object_refs")
     logs = _parse_json_field(run, "logs")
-    project_id = str(run.get("project_id") or input_payload.get("project_id") or "global")
+    project_id = _require_project_id(run.get("project_id") or input_payload.get("project_id"))
     status = str(run.get("status") or output_payload.get("status") or "")
     outcome = "failed" if status == "failed" else ("partial_success" if status == "partial_success" else "success")
     episode = {
@@ -123,19 +130,14 @@ def search_episodes(project_id: str, query: str, limit: int = 10) -> list[dict[s
     return sorted(scored, key=lambda item: item.get("score", 0), reverse=True)[:limit]
 
 
-def link_episode_to_memory_items(episode_id: str, memory_ids: list[str]) -> dict[str, Any]:
-    dirs = ensure_memoryos_dirs()
-    for path in dirs["episodic"].glob("*/episodes.jsonl"):
-        rows = read_jsonl(path)
-        changed = False
-        for row in rows:
-            if row.get("episode_id") == episode_id:
-                row["memory_ids"] = sorted(set(list(row.get("memory_ids") or []) + list(memory_ids or [])))
-                row["updated_at"] = utc_now_iso()
-                changed = True
-                target = row
-        if changed:
+def link_episode_to_memory_items(episode_id: str, memory_ids: list[str], project_id: str) -> dict[str, Any]:
+    path = _path(project_id)
+    rows = read_jsonl(path)
+    for row in rows:
+        if row.get("episode_id") == episode_id:
+            row["memory_ids"] = sorted(set(list(row.get("memory_ids") or []) + list(memory_ids or [])))
+            row["updated_at"] = utc_now_iso()
             write_jsonl(path, rows)
-            return target
+            return row
     raise KeyError(f"episode not found: {episode_id}")
 

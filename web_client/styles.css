@@ -1148,6 +1148,76 @@ textarea:disabled {
   gap: 8px;
 }
 
+.project-context-strip {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(235, 246, 255, 0.92), rgba(248, 250, 252, 0.96));
+}
+
+.project-context-strip div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-context-strip span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.project-context-strip strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-status-card,
+.project-developer-details {
+  display: grid;
+  gap: 10px;
+}
+
+.project-status-card {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.project-status-card div,
+.project-developer-details div {
+  min-width: 0;
+}
+
+.project-status-card span,
+.project-developer-details span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.project-status-card strong,
+.project-developer-details strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.project-developer-details {
+  grid-column: 1 / -1;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 .library-sections {
   display: grid;
   gap: 14px;
@@ -1521,6 +1591,37 @@ textarea:disabled {
 
 .full-span {
   grid-column: 1 / -1;
+}
+
+.artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.artifact-path {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.developer-details pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.path-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.path-copy-row code {
+  flex: 1;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 980px) {

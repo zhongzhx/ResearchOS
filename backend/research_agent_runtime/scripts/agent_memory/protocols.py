@@ -9,14 +9,18 @@ from .models import as_list, clean, json_dumps, now, row_to_dict, stable_id
 
 
 def create_protocol(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(data.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     name = clean(data.get("name")) or clean(data.get("protocol_name"))
     if not name:
         raise ValueError("protocol name is required")
     version = clean(data.get("version")) or "v1"
-    protocol_id = clean(data.get("id")) or stable_id(data.get("group_id", ""), name, version)
+    protocol_id = clean(data.get("id")) or stable_id(project_id, data.get("group_id", ""), name, version)
     row = {
         "id": protocol_id,
         "group_id": clean(data.get("group_id")),
+        "project_id": project_id,
         "name": name,
         "version": version,
         "purpose": clean(data.get("purpose")),
@@ -33,11 +37,11 @@ def create_protocol(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
     conn.execute(
         """
         INSERT INTO protocols(
-            id, group_id, name, version, purpose, materials_json, steps_json, parameters_json,
+            id, group_id, project_id, name, version, purpose, materials_json, steps_json, parameters_json,
             critical_notes, troubleshooting, related_experiment_types_json, created_at, updated_at
         )
         VALUES (
-            :id, :group_id, :name, :version, :purpose, :materials_json, :steps_json, :parameters_json,
+            :id, :group_id, :project_id, :name, :version, :purpose, :materials_json, :steps_json, :parameters_json,
             :critical_notes, :troubleshooting, :related_experiment_types_json, :created_at, :updated_at
         )
         ON CONFLICT(id) DO UPDATE SET
@@ -61,6 +65,7 @@ def create_protocol(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
         {
             "user_id": data.get("user_id", "local_user"),
             "group_id": row["group_id"],
+            "project_id": project_id,
             "memory_type": "protocol_memory",
             "subject": f"{name} {version}",
             "content": f"Protocol {name} {version}: {row['purpose']}. Critical notes: {row['critical_notes']}.",
@@ -74,6 +79,9 @@ def create_protocol(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_protocol(agent_root: Path, protocol_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(patch.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     allowed = {
         "group_id",
         "name",
@@ -97,10 +105,10 @@ def update_protocol(agent_root: Path, protocol_id: str, patch: dict[str, Any]) -
     if not assignments:
         raise ValueError("no supported protocol fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), protocol_id])
+    values.extend([now(), protocol_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE protocols SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM protocols WHERE id=?", (protocol_id,)).fetchone()
+    conn.execute(f"UPDATE protocols SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM protocols WHERE id=? AND project_id=?", (protocol_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("protocol not found")
@@ -109,16 +117,19 @@ def update_protocol(agent_root: Path, protocol_id: str, patch: dict[str, Any]) -
     return row_to_dict(row)
 
 
-def latest_protocol(agent_root: Path, name: str, group_id: str = "") -> dict[str, Any] | None:
+def latest_protocol(agent_root: Path, name: str, project_id: str, group_id: str = "") -> dict[str, Any] | None:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
     row = conn.execute(
         """
         SELECT * FROM protocols
-        WHERE name=? AND (?='' OR group_id=?)
+        WHERE name=? AND project_id=? AND (?='' OR group_id=?)
         ORDER BY updated_at DESC, version DESC
         LIMIT 1
         """,
-        (name, group_id, group_id),
+        (name, project_id, group_id, group_id),
     ).fetchone()
     conn.close()
     return row_to_dict(row) if row else None

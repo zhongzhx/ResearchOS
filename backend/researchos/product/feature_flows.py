@@ -163,7 +163,7 @@ def get_product_feature(feature_id: str) -> dict[str, Any]:
     return row
 
 
-def run_product_feature_demo(feature_id: str, project_id: str = "demo_project") -> dict[str, Any]:
+def run_product_feature_demo(feature_id: str, project_id: str) -> dict[str, Any]:
     return run_product_feature(feature_id, {"project_id": project_id, "mode": "demo"})
 
 
@@ -172,7 +172,9 @@ def run_product_feature(feature_id: str, payload: dict[str, Any] | None = None) 
         return product_response(ok=False, feature_id=feature_id, status="not_connected", warnings=[f"unknown_feature:{feature_id}"], result={"error": "unknown_feature"})
     payload = payload or {}
     mode = str(payload.get("mode") or "normal")
-    project_id = str(payload.get("project_id") or "demo_project")
+    project_id = str(payload.get("project_id") or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
     contract = FEATURES[feature_id]
     status = resolve_feature_status(contract)
 

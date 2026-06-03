@@ -100,7 +100,7 @@ export function workflowConfirmationMessage(workflow) {
 export function workflowResultMessage(result) {
   const mascotState = mascotStateForTaskStatus(result?.status || result?.execution_status || result?.result?.status || "success");
   return assistantMessage(`
-    ${renderWorkflowResult(result, { projectId: result?.project_id || appState.activeProjectId || "default" })}
+    ${renderWorkflowResult(result, { projectId: result?.project_id || appState.activeProjectId || "" })}
     ${technicalDetails(result?.technical)}
   `, mascotState);
 }

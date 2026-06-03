@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -238,6 +239,16 @@ def call_tool(tool_name: str, inputs: dict[str, Any], task_spec: TaskSpec) -> di
             command_errors = _validate_script_command(args, inputs, task_spec, cwd_path, workspace)
             if command_errors:
                 return {"ok": False, "tool_name": tool_name, "error": "; ".join(command_errors), "logs": ["script_runner command rejected"]}
+            required_dependencies = [str(item).strip() for item in inputs.get("required_dependencies") or [] if str(item).strip()]
+            missing_dependencies = [module for module in required_dependencies if importlib.util.find_spec(module) is None]
+            if missing_dependencies:
+                return {
+                    "ok": False,
+                    "tool_name": tool_name,
+                    "status": "dependency_missing",
+                    "error": f"missing local Python dependencies: {', '.join(missing_dependencies)}",
+                    "logs": ["script_runner dependency check failed"],
+                }
             timeout_seconds = max(1, min(int(inputs.get("timeout_seconds") or inputs.get("timeout") or 30), 120))
             max_output_chars = max(100, min(int(inputs.get("max_output_chars") or 4000), 100000))
             completed = subprocess.run(args, cwd=str(cwd_path), capture_output=True, text=True, timeout=timeout_seconds, check=False)

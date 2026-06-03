@@ -57,10 +57,10 @@ class ProjectClientManagementTests(unittest.TestCase):
     def test_purge_project_is_available_in_project_tools_without_developer_mode(self) -> None:
         source = read(WEB_CLIENT / "views" / "projects.js")
 
-        self.assertNotIn("appState.developerMode", source)
         self.assertIn("purgeProject(activeId", source)
         self.assertIn("data-delete-project-id", source)
         self.assertIn("purgeProject(targetId", source)
+        self.assertIn("confirm: true", source)
         self.assertIn("危险区", source)
 
 

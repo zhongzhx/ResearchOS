@@ -9,6 +9,9 @@ from .models import as_dict, clean, json_dumps, now, row_to_dict, stable_id
 
 
 def create_sample(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(data.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     sample_code = clean(data.get("sample_code") or data.get("id") or data.get("sample_id"))
     if not sample_code:
         raise ValueError("sample_code is required")
@@ -16,7 +19,7 @@ def create_sample(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
     row = {
         "id": sample_id,
         "group_id": clean(data.get("group_id")),
-        "project_id": clean(data.get("project_id")),
+        "project_id": project_id,
         "sample_code": sample_code,
         "sample_type": clean(data.get("sample_type")),
         "name": clean(data.get("name")) or sample_code,
@@ -77,9 +80,11 @@ def create_sample(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_sample(agent_root: Path, sample_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(patch.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     allowed = {
         "group_id",
-        "project_id",
         "sample_code",
         "sample_type",
         "name",
@@ -101,10 +106,10 @@ def update_sample(agent_root: Path, sample_id: str, patch: dict[str, Any]) -> di
     if not assignments:
         raise ValueError("no supported sample fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), sample_id])
+    values.extend([now(), sample_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE samples SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM samples WHERE id=?", (sample_id,)).fetchone()
+    conn.execute(f"UPDATE samples SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM samples WHERE id=? AND project_id=?", (sample_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("sample not found")

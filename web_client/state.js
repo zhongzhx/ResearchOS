@@ -2,6 +2,8 @@ const ACTIVE_PROJECT_KEY = "researchos.activeProjectId";
 const VIEW_KEY = "researchos.currentView";
 const CHAT_HISTORY_KEY = "researchos.chatHistory.v1";
 const DEVELOPER_MODE_KEY = "researchos.developerMode";
+const CLIENT_CACHE_SCHEMA_KEY = "researchos.clientCacheSchemaVersion";
+export const CLIENT_CACHE_SCHEMA_VERSION = "2";
 
 function safeLocalStorageGet(key, fallback = "") {
   try {
@@ -14,6 +16,14 @@ function safeLocalStorageGet(key, fallback = "") {
 function safeLocalStorageSet(key, value) {
   try {
     localStorage.setItem(key, value);
+  } catch {
+    // UI preferences are optional.
+  }
+}
+
+function safeLocalStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
   } catch {
     // UI preferences are optional.
   }
@@ -35,6 +45,21 @@ function safeLocalStorageJson(key, fallback) {
     return fallback;
   }
 }
+
+export function clearLegacyProjectCaches() {
+  try {
+    if (localStorage.getItem(CLIENT_CACHE_SCHEMA_KEY) === CLIENT_CACHE_SCHEMA_VERSION) return;
+    for (let index = Number(localStorage.length || 0) - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith("researchos.")) localStorage.removeItem(key);
+    }
+    localStorage.setItem(CLIENT_CACHE_SCHEMA_KEY, CLIENT_CACHE_SCHEMA_VERSION);
+  } catch {
+    // The desktop client can continue without browser cache access.
+  }
+}
+
+clearLegacyProjectCaches();
 
 const initialChatHistory = safeLocalStorageJson(CHAT_HISTORY_KEY, { projects: {} });
 
@@ -99,6 +124,7 @@ appState.lastConversationByProject = Object.fromEntries(
 );
 
 export function setProjects(projects) {
+  const previousProjectId = appState.activeProjectId;
   appState.cachedProjects = Array.isArray(projects)
     ? projects.filter((project) => !["archived", "purged"].includes(String(project.status || "").toLowerCase()))
     : [];
@@ -106,14 +132,30 @@ export function setProjects(projects) {
   appState.activeProject = found || appState.cachedProjects[0] || null;
   appState.activeProjectId = appState.activeProject?.id || appState.activeProject?.project_id || "";
   if (appState.activeProjectId) safeLocalStorageSet(ACTIVE_PROJECT_KEY, appState.activeProjectId);
+  else safeLocalStorageRemove(ACTIVE_PROJECT_KEY);
   switchConversationForProject(appState.activeProjectId);
+  if (previousProjectId !== appState.activeProjectId) {
+    setLastRunResult(null);
+    emitActiveProjectChange(previousProjectId, appState.activeProjectId);
+  }
 }
 
 export function setActiveProjectId(projectId) {
-  appState.activeProjectId = projectId || "";
+  const previousProjectId = appState.activeProjectId;
+  appState.activeProjectId = normalizeProjectId(projectId);
   appState.activeProject = appState.cachedProjects.find((project) => project.id === appState.activeProjectId || project.project_id === appState.activeProjectId) || null;
   if (appState.activeProjectId) safeLocalStorageSet(ACTIVE_PROJECT_KEY, appState.activeProjectId);
+  else safeLocalStorageRemove(ACTIVE_PROJECT_KEY);
   switchConversationForProject(appState.activeProjectId);
+  if (previousProjectId !== appState.activeProjectId) {
+    setLastRunResult(null);
+    emitActiveProjectChange(previousProjectId, appState.activeProjectId);
+  }
+}
+
+function emitActiveProjectChange(previousProjectId, projectId) {
+  if (typeof window === "undefined" || typeof CustomEvent !== "function") return;
+  window.dispatchEvent?.(new CustomEvent("researchos:active-project-changed", { detail: { previousProjectId, projectId } }));
 }
 
 export function setCurrentView(view) {

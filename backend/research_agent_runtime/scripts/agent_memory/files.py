@@ -21,6 +21,9 @@ def file_checksum(path_value: str) -> str:
 
 
 def register_data_file(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(data.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     path_value = clean(data.get("path") or data.get("file_path"))
     filename = clean(data.get("filename")) or (Path(path_value).name if path_value else "unnamed_file")
     checksum = clean(data.get("checksum")) or file_checksum(path_value)
@@ -29,7 +32,7 @@ def register_data_file(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]
         "id": file_id,
         "user_id": clean(data.get("user_id")) or "local_user",
         "group_id": clean(data.get("group_id")),
-        "project_id": clean(data.get("project_id")),
+        "project_id": project_id,
         "experiment_id": clean(data.get("experiment_id")),
         "filename": filename,
         "file_type": clean(data.get("file_type")) or Path(filename).suffix.lower().lstrip("."),
@@ -96,10 +99,13 @@ def register_data_file(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]
     return data_file
 
 
-def _link_file(agent_root: Path, file_id: str, column: str, value: str) -> dict[str, Any]:
+def _link_file(agent_root: Path, file_id: str, column: str, value: str, project_id: str) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    conn.execute(f"UPDATE data_files SET {column}=?, updated_at=? WHERE id=?", (value, now(), file_id))
-    row = conn.execute("SELECT * FROM data_files WHERE id=?", (file_id,)).fetchone()
+    conn.execute(f"UPDATE data_files SET {column}=?, updated_at=? WHERE id=? AND project_id=?", (value, now(), file_id, project_id))
+    row = conn.execute("SELECT * FROM data_files WHERE id=? AND project_id=?", (file_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("data file not found")
@@ -109,8 +115,13 @@ def _link_file(agent_root: Path, file_id: str, column: str, value: str) -> dict[
 
 
 def link_file_to_project(agent_root: Path, file_id: str, project_id: str) -> dict[str, Any]:
-    return _link_file(agent_root, file_id, "project_id", project_id)
+    return _link_file(agent_root, file_id, "project_id", project_id, project_id)
 
 
-def link_file_to_experiment(agent_root: Path, file_id: str, experiment_id: str) -> dict[str, Any]:
-    return _link_file(agent_root, file_id, "experiment_id", experiment_id)
+def link_file_to_experiment(agent_root: Path, file_id: str, experiment_id: str, project_id: str) -> dict[str, Any]:
+    conn = connect(agent_root)
+    experiment = conn.execute("SELECT id FROM experiments WHERE id=? AND project_id=?", (experiment_id, project_id)).fetchone()
+    conn.close()
+    if not experiment:
+        raise KeyError("experiment not found")
+    return _link_file(agent_root, file_id, "experiment_id", experiment_id, project_id)

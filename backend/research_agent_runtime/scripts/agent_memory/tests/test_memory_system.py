@@ -70,7 +70,7 @@ class AgentMemoryTests(unittest.TestCase):
     def test_register_file_and_link_to_experiment(self) -> None:
         exp = create_experiment(self.root, {"project_id": self.project["id"], "title": "ELISA pilot"})
         data_file = register_data_file(self.root, {"project_id": self.project["id"], "filename": "elisa.csv", "columns": ["sample", "group", "TNF"]})
-        linked = link_file_to_experiment(self.root, data_file["id"], exp["id"])
+        linked = link_file_to_experiment(self.root, data_file["id"], exp["id"], self.project["id"])
         self.assertEqual(linked["experiment_id"], exp["id"])
 
     def test_retrieve_completed_experiments_for_project(self) -> None:
@@ -129,15 +129,15 @@ class AgentMemoryTests(unittest.TestCase):
 
     def test_archive_without_deleting_evidence(self) -> None:
         memory = create_memory(self.root, {"project_id": self.project["id"], "memory_type": "task_memory", "subject": "old task", "content": "Old task"})
-        archived = archive_memory(self.root, memory["id"])
+        archived = archive_memory(self.root, memory["id"], self.project["id"])
         self.assertEqual(archived["status"], "archived")
         active = retrieve_memory(self.root, {"project_id": self.project["id"], "query": "Old task"})
         self.assertFalse(any(row["id"] == memory["id"] for row in active))
 
     def test_latest_active_protocol_version(self) -> None:
-        create_protocol(self.root, {"group_id": self.group["id"], "name": "LC-MS preprocessing", "version": "v1"})
-        protocol = create_protocol(self.root, {"group_id": self.group["id"], "name": "LC-MS preprocessing", "version": "v2"})
-        latest = latest_protocol(self.root, "LC-MS preprocessing", self.group["id"])
+        create_protocol(self.root, {"group_id": self.group["id"], "project_id": self.project["id"], "name": "LC-MS preprocessing", "version": "v1"})
+        protocol = create_protocol(self.root, {"group_id": self.group["id"], "project_id": self.project["id"], "name": "LC-MS preprocessing", "version": "v2"})
+        latest = latest_protocol(self.root, "LC-MS preprocessing", self.project["id"], self.group["id"])
         self.assertEqual(latest["id"], protocol["id"])
 
     def test_search_by_cell_line_compound_assay_instrument(self) -> None:
@@ -156,7 +156,7 @@ class AgentMemoryTests(unittest.TestCase):
         self.assertTrue(rows)
 
     def test_low_confidence_extraction_review_queue(self) -> None:
-        result = extract_and_queue_if_needed(self.root, {"text": "Maybe remember this unclear note.", "group_id": self.group["id"]})
+        result = extract_and_queue_if_needed(self.root, {"project_id": self.project["id"], "text": "Maybe remember this unclear note.", "group_id": self.group["id"]})
         self.assertIsNotNone(result["review_item"])
 
 

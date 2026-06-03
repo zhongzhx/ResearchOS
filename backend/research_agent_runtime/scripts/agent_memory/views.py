@@ -20,6 +20,9 @@ def upsert_memory_view(
     evidence_memory_ids: list[str],
     confidence: float = 0.75,
 ) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     view_id = stable_id(user_id, group_id, project_id, view_type, subject)
     row = {
         "id": view_id,
@@ -79,6 +82,9 @@ def get_current_project_view(agent_root: Path, project_id: str) -> dict[str, Any
 
 
 def get_views(agent_root: Path, project_id: str = "", user_id: str = "", group_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
     rows = conn.execute(
         """

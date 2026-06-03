@@ -98,6 +98,22 @@ function preferenceSection() {
   </div>`;
 }
 
+function localPathSection(health) {
+  const data = health.data || {};
+  const agentRoot = data.agent_root || "服务连接后显示";
+  const developerPaths = appState.developerMode
+    ? `<div class="artifact-meta"><span>数据库：${escapeHtml(data.state_db || "未连接")}</span><span>调试日志：${escapeHtml(data.log_path || "未连接")}</span></div>`
+    : "";
+  return `<div class="grid">
+    <p class="muted">所有项目资料、生成物和运行记录都保存在本地 agent root 下。该路径只读显示。</p>
+    <div class="path-copy-row">
+      <code id="localAgentRoot">${escapeHtml(agentRoot)}</code>
+      <button class="button secondary small" type="button" id="copyAgentRoot">复制路径</button>
+    </div>
+    ${developerPaths}
+  </div>`;
+}
+
 export async function renderSettingsView({ root }) {
   root.innerHTML = `<section class="page">
     <header class="page-header">
@@ -106,16 +122,22 @@ export async function renderSettingsView({ root }) {
     <div class="page-scroll"><div class="grid" id="settingsContent">${emptyState("正在加载设置", "正在检查本地运行时和设置接口。")}</div></div>
   </section>`;
 
+  const projectRequired = {
+    ok: false,
+    data: { status: "needs_input" },
+    error: "请先选择或创建项目",
+  };
   const [health, runtime, scheduler, resolver, llm] = await Promise.all([
     getHealth(),
-    getRuntimeStatus(appState.activeProjectId),
-    getSchedulerStatus(appState.activeProjectId),
+    appState.activeProjectId ? getRuntimeStatus(appState.activeProjectId) : Promise.resolve(projectRequired),
+    appState.activeProjectId ? getSchedulerStatus(appState.activeProjectId) : Promise.resolve(projectRequired),
     getResolverHealth(),
     getLlmSettings(),
   ]);
   root.querySelector("#settingsContent").innerHTML = `
     <div class="panel pad"><h2 class="item-title">LLM 服务 / API 设置</h2>${llmSettingsSection(llm)}</div>
     <div class="panel pad"><h2 class="item-title">偏好</h2>${preferenceSection()}</div>
+    <div class="panel pad"><h2 class="item-title">本地存储</h2>${localPathSection(health)}</div>
     ${
       appState.developerMode
         ? `<div class="panel pad"><h2 class="item-title">运行状态</h2>${runtimeSection(health, runtime, scheduler)}</div>
@@ -129,6 +151,9 @@ export async function renderSettingsView({ root }) {
     setDeveloperMode(event.target.checked);
     window.dispatchEvent(new CustomEvent("researchos:refresh-navigation"));
     renderSettingsView({ root });
+  });
+  root.querySelector("#copyAgentRoot")?.addEventListener("click", async () => {
+    await navigator.clipboard?.writeText?.(root.querySelector("#localAgentRoot")?.textContent || "");
   });
 
   const form = root.querySelector("#llmForm");

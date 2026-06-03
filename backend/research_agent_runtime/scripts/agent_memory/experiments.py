@@ -10,6 +10,8 @@ from .models import as_list, clean, json_dumps, now, row_to_dict, stable_id
 
 def create_experiment(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
     project_id = clean(data.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     title = clean(data.get("title")) or clean(data.get("experiment_title")) or "Untitled experiment"
     experiment_id = clean(data.get("id")) or stable_id(project_id, title, data.get("date", ""), data.get("operator", ""))
     row = {
@@ -96,8 +98,10 @@ def create_experiment(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_experiment(agent_root: Path, experiment_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(patch.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     allowed = {
-        "project_id",
         "title",
         "experiment_type",
         "date",
@@ -127,10 +131,10 @@ def update_experiment(agent_root: Path, experiment_id: str, patch: dict[str, Any
     if not assignments:
         raise ValueError("no supported experiment fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), experiment_id])
+    values.extend([now(), experiment_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE experiments SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM experiments WHERE id=?", (experiment_id,)).fetchone()
+    conn.execute(f"UPDATE experiments SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM experiments WHERE id=? AND project_id=?", (experiment_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("experiment not found")

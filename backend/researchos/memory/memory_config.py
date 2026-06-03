@@ -22,7 +22,9 @@ def utc_now_iso() -> str:
 
 
 def memoryos_root() -> Path:
-    return Path(os.environ.get("MEMORYOS_ROOT") or Path.cwd() / "data" / "memoryos")
+    configured = os.environ.get("MEMORYOS_ROOT") or os.environ.get("RESEARCHOS_MEMORYOS_DIR")
+    agent_data_dir = os.environ.get("RESEARCHOS_AGENT_DATA_DIR")
+    return Path(configured or (Path(agent_data_dir) / "memoryos" if agent_data_dir else Path.cwd() / "data" / "memoryos"))
 
 
 def ensure_memoryos_dirs() -> dict[str, Path]:

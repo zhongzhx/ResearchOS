@@ -16,13 +16,17 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import research_agent_api as api  # noqa: E402
+import research_os_mvp as ros  # noqa: E402
 
 
 class DemoProductFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="aura_demo_product_"))
         self.previous_config = getattr(api, "CONFIG", None)
+        self.previous_agent_root = os.environ.get("RESEARCHOS_AGENT_ROOT")
+        os.environ["RESEARCHOS_AGENT_ROOT"] = str(self.tmp / "agent_data")
         api.CONFIG = api.RuntimeConfig(self.tmp / "agent_data")
+        ros.create_project(api.CONFIG.agent_root, {"id": "demo_project", "title": "Demo Project"})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -34,6 +38,10 @@ class DemoProductFlowTests(unittest.TestCase):
         self.server.server_close()
         if self.previous_config is not None:
             api.CONFIG = self.previous_config
+        if self.previous_agent_root is None:
+            os.environ.pop("RESEARCHOS_AGENT_ROOT", None)
+        else:
+            os.environ["RESEARCHOS_AGENT_ROOT"] = self.previous_agent_root
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _get_json(self, path: str) -> dict:

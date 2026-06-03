@@ -25,6 +25,7 @@ class ProductFeatureStatusApiTests(unittest.TestCase):
         api.CONFIG = api.RuntimeConfig(self.tmp / "agent_data")
         self.previous_env = {"RESEARCHOS_AGENT_ROOT": os.environ.get("RESEARCHOS_AGENT_ROOT")}
         os.environ["RESEARCHOS_AGENT_ROOT"] = str(self.tmp / "agent_data")
+        api.research_os.create_project(api.CONFIG.agent_root, {"id": "demo_project", "title": "Demo Project"})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()

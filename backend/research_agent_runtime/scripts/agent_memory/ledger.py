@@ -76,6 +76,9 @@ def _existing_duplicate(conn: Any, row: dict[str, Any]) -> dict[str, Any] | None
 
 
 def create_memory(agent_root: Path, event: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(event.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     memory_type = clean(event.get("memory_type")) or "project_memory"
     if memory_type not in MEMORY_TYPES:
         raise ValueError(f"unsupported memory_type: {memory_type}")
@@ -94,7 +97,7 @@ def create_memory(agent_root: Path, event: dict[str, Any]) -> dict[str, Any]:
         ),
         "user_id": clean(event.get("user_id")) or "local_user",
         "group_id": clean(event.get("group_id")),
-        "project_id": clean(event.get("project_id")),
+        "project_id": project_id,
         "experiment_id": clean(event.get("experiment_id")),
         "timestamp": timestamp,
         "source_type": clean(event.get("source_type")) or "manual",
@@ -162,6 +165,9 @@ def create_memory(agent_root: Path, event: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_memory(agent_root: Path, memory_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(patch.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     allowed = {
         "subject",
         "content",
@@ -191,10 +197,10 @@ def update_memory(agent_root: Path, memory_id: str, patch: dict[str, Any]) -> di
     if not assignments:
         raise ValueError("no supported fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), memory_id])
+    values.extend([now(), memory_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE memory_ledger SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM memory_ledger WHERE id=?", (memory_id,)).fetchone()
+    conn.execute(f"UPDATE memory_ledger SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM memory_ledger WHERE id=? AND project_id=?", (memory_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("memory not found")
@@ -210,14 +216,21 @@ def get_memory(agent_root: Path, memory_id: str) -> dict[str, Any] | None:
     return row_to_dict(row) if row else None
 
 
-def archive_memory(agent_root: Path, memory_id: str) -> dict[str, Any]:
-    return update_memory(agent_root, memory_id, {"status": "archived"})
+def archive_memory(agent_root: Path, memory_id: str, project_id: str) -> dict[str, Any]:
+    return update_memory(agent_root, memory_id, {"project_id": project_id, "status": "archived"})
 
 
-def delete_memory(agent_root: Path, memory_id: str) -> dict[str, Any]:
+def delete_memory(agent_root: Path, memory_id: str, project_id: str) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
+    row = conn.execute("SELECT id FROM memory_ledger WHERE id=? AND project_id=?", (memory_id, project_id)).fetchone()
+    if not row:
+        conn.close()
+        raise KeyError("memory not found")
     conn.execute("DELETE FROM memory_embeddings WHERE memory_id=?", (memory_id,))
-    cur = conn.execute("DELETE FROM memory_ledger WHERE id=?", (memory_id,))
+    cur = conn.execute("DELETE FROM memory_ledger WHERE id=? AND project_id=?", (memory_id, project_id))
     conn.commit()
     conn.close()
     return {"deleted": cur.rowcount > 0, "id": memory_id}

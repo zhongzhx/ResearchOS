@@ -48,7 +48,7 @@ class ResearchOSProjectPurgeCleanupTests(unittest.TestCase):
         self.assertTrue(canonical_memory.list_samples(self.agent_root, self.project_id))
 
         plan = ros.purge_project(self.agent_root, self.project_id, dry_run=True)["deletion_plan"]
-        result = ros.purge_project(self.agent_root, self.project_id, confirmation=plan["confirmation_phrase"])
+        result = ros.purge_project(self.agent_root, self.project_id, confirmation=plan["confirmation_phrase"], confirm=True)
 
         self.assertTrue(result["executed"])
         self.assertFalse(Path(self.project["root_dir"]).exists())

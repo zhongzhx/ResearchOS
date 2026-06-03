@@ -92,6 +92,12 @@ from backend.researchos.settings.llm_settings import get_llm_settings_summary as
 from backend.researchos.settings.llm_settings import test_llm_settings as test_backend_llm_settings
 from backend.researchos.settings.llm_settings import update_llm_settings as update_backend_llm_settings
 from backend.researchos.settings.secret_store import redact_secrets_in_obj
+from backend.researchos.integration.workflow_execution_service import (
+    execute_workflow as execute_workflow_service,
+    list_workflow_definitions,
+    plan_workflow_execution,
+    route_chat_workflow,
+)
 
 
 class RuntimeConfig:
@@ -749,7 +755,7 @@ class Handler(BaseHTTPRequestHandler):
                 from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
                 feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/demo").strip("/"))
-                project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
+                project_id = query.get("project_id", [""])[0]
                 json_response(self, 200, run_product_feature_demo(feature_id, project_id=project_id))
             except Exception as exc:
                 handle_error(self, exc)
@@ -769,7 +775,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
-                project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
+                project_id = query.get("project_id", [""])[0]
                 json_response(self, 200, run_product_feature_demo("dual_agent_research_task", project_id=project_id))
             except Exception as exc:
                 handle_error(self, exc)
@@ -821,7 +827,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 from backend.researchos.api import dual_agent_routes
 
-                project_id = query.get("project_id", ["demo_project"])[0] or "demo_project"
+                project_id = query.get("project_id", [""])[0]
                 result = run_dual_agent_api(lambda: dual_agent_routes.demo_dual_agent(project_id=project_id))
                 json_response(self, 200, normalize_dual_agent_result(result))
             except Exception as exc:
@@ -994,7 +1000,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/literature/search-tasks/") and path.endswith("/progress"):
             task_id = urllib.parse.unquote(path.split("/")[4])
             try:
-                json_response(self, 200, research_os.get_literature_search_task_detail(CONFIG.agent_root, task_id))
+                json_response(self, 200, research_os.get_literature_search_task_detail(CONFIG.agent_root, task_id, query.get("project_id", [""])[0]))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1002,7 +1008,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/literature/search-tasks/"):
             task_id = urllib.parse.unquote(path.split("/")[4])
             try:
-                json_response(self, 200, research_os.get_literature_search_task_detail(CONFIG.agent_root, task_id))
+                json_response(self, 200, research_os.get_literature_search_task_detail(CONFIG.agent_root, task_id, query.get("project_id", [""])[0]))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1106,7 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/skill-runs/"):
             skill_run_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"skill_run": research_os.get_skill_run(CONFIG.agent_root, skill_run_id)})
+                json_response(self, 200, {"skill_run": research_os.get_skill_run(CONFIG.agent_root, skill_run_id, query.get("project_id", [""])[0])})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1201,7 +1207,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/tasks/"):
             task_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"task": research_os.get_agent_task(CONFIG.agent_root, task_id)})
+                json_response(self, 200, {"task": research_os.get_agent_task(CONFIG.agent_root, task_id, query.get("project_id", [""])[0])})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1376,10 +1382,36 @@ class Handler(BaseHTTPRequestHandler):
                 handle_error(self, exc)
             return
 
+        if path.startswith("/research-os/projects/") and path.endswith("/paths"):
+            project_id = urllib.parse.unquote(path.split("/")[3])
+            try:
+                json_response(self, 200, {"paths": research_os.get_project_paths(CONFIG.agent_root, project_id)})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/research-os/projects/") and "/artifacts/" in path and path.endswith("/open-info"):
+            parts = path.split("/")
+            project_id = urllib.parse.unquote(parts[3])
+            artifact_id = urllib.parse.unquote(parts[5])
+            try:
+                json_response(self, 200, {"open_info": research_os.registered_artifact_open_info(CONFIG.agent_root, project_id, artifact_id)})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/research-os/projects/") and path.endswith("/artifacts"):
+            project_id = urllib.parse.unquote(path.split("/")[3])
+            try:
+                json_response(self, 200, {"artifacts": research_os.list_registered_artifacts(CONFIG.agent_root, project_id, query.get("source_type", [""])[0])})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
         if path.startswith("/research-os/evidence/"):
             evidence_id = urllib.parse.unquote(path.removeprefix("/research-os/evidence/"))
             try:
-                json_response(self, 200, {"evidence": research_os.get_evidence_item(CONFIG.agent_root, evidence_id)})
+                json_response(self, 200, {"evidence": research_os.get_evidence_item(CONFIG.agent_root, evidence_id, query.get("project_id", [""])[0])})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1394,7 +1426,39 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/research-os/files":
             try:
-                json_response(self, 200, {"files": research_os.list_files(CONFIG.agent_root, query.get("project_id", [""])[0])})
+                project_id = query.get("project_id", [""])[0]
+                json_response(
+                    self,
+                    200,
+                    {
+                        "files": research_os.list_files(CONFIG.agent_root, project_id),
+                        "artifacts": research_os.list_registered_artifacts(CONFIG.agent_root, project_id),
+                    },
+                )
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/research-os/workflow-registry":
+            try:
+                json_response(self, 200, list_workflow_definitions(CONFIG.agent_root))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/research-os/artifacts":
+            try:
+                json_response(
+                    self,
+                    200,
+                    {
+                        "artifacts": research_os.list_project_artifacts(
+                            CONFIG.agent_root,
+                            query.get("project_id", [""])[0],
+                            int(query.get("limit", ["100"])[0] or 100),
+                        )
+                    },
+                )
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1402,7 +1466,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/files/") and path.endswith("/samples"):
             file_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, research_os.file_samples(CONFIG.agent_root, file_id))
+                json_response(self, 200, research_os.file_samples(CONFIG.agent_root, file_id, query.get("project_id", [""])[0]))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1410,7 +1474,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/files/"):
             file_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"file": research_os.read_file_record(CONFIG.agent_root, file_id)})
+                project_id = query.get("project_id", [""])[0]
+                if file_id.startswith("artifact_"):
+                    json_response(self, 200, {"artifact": research_os.get_registered_artifact(CONFIG.agent_root, project_id, file_id)})
+                else:
+                    json_response(self, 200, {"file": research_os.read_file_record(CONFIG.agent_root, file_id, project_id)})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1445,7 +1513,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/protocols/"):
             protocol_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"protocol": research_os.get_protocol(CONFIG.agent_root, protocol_id)})
+                json_response(self, 200, {"protocol": research_os.get_protocol(CONFIG.agent_root, protocol_id, query.get("project_id", [""])[0])})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1512,7 +1580,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/claims/"):
             claim_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"claim": research_os.get_claim_with_evidence(CONFIG.agent_root, claim_id)})
+                json_response(self, 200, {"claim": research_os.get_claim_with_evidence(CONFIG.agent_root, claim_id, query.get("project_id", [""])[0])})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1561,10 +1629,9 @@ class Handler(BaseHTTPRequestHandler):
                     self,
                     200,
                     {
-                        "review_queue": memory_api.list_review_queue(
+                        "review_queue": canonical_memory.list_memory_review_items(
                             CONFIG.agent_root,
-                            user_id=query.get("user_id", [""])[0],
-                            group_id=query.get("group_id", [""])[0],
+                            project_id=query.get("project_id", [""])[0],
                             status=query.get("status", ["pending"])[0],
                         )
                     },
@@ -1595,7 +1662,7 @@ class Handler(BaseHTTPRequestHandler):
             experiment_id = path.split("/")[3]
             include_archived = query.get("include_archived", ["0"])[0].lower() in {"1", "true", "yes"}
             try:
-                json_response(self, 200, {"memory": memory_api.list_experiment_memory(CONFIG.agent_root, experiment_id, include_archived)})
+                json_response(self, 200, {"memory": memory_api.list_experiment_memory(CONFIG.agent_root, experiment_id, query.get("project_id", [""])[0], include_archived)})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -1734,7 +1801,7 @@ class Handler(BaseHTTPRequestHandler):
                 from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
                 feature_id = urllib.parse.unquote(path.removeprefix("/api/product/features/").removesuffix("/demo").strip("/"))
-                project_id = str(payload.get("project_id") or "demo_project")
+                project_id = str(payload.get("project_id") or "")
                 json_response(self, 200, run_product_feature_demo(feature_id, project_id=project_id))
             except Exception as exc:
                 handle_error(self, exc)
@@ -1744,7 +1811,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 from backend.researchos.integration.mvp_product_bridge import run_product_feature_demo
 
-                project_id = str(payload.get("project_id") or "demo_project")
+                project_id = str(payload.get("project_id") or "")
                 json_response(self, 200, run_product_feature_demo("dual_agent_research_task", project_id=project_id))
             except Exception as exc:
                 handle_error(self, exc)
@@ -1940,6 +2007,7 @@ class Handler(BaseHTTPRequestHandler):
                         dry_run=bool(payload.get("dry_run")),
                         confirmation=str(payload.get("confirmation") or "").strip(),
                         confirmed_by_user=str(payload.get("confirmed_by_user") or "").strip(),
+                        confirm=payload.get("confirm") is True,
                     ),
                 )
             except Exception as exc:
@@ -1969,6 +2037,61 @@ class Handler(BaseHTTPRequestHandler):
                 handle_error(self, exc)
             return
 
+        if path == "/research-os/workflow-executions/plan":
+            try:
+                json_response(self, 200, plan_workflow_execution(CONFIG.agent_root, payload))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/research-os/workflow-executions/chat-route":
+            try:
+                json_response(self, 200, route_chat_workflow(CONFIG.agent_root, payload))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/research-os/workflow-executions":
+            try:
+                json_response(self, 200, execute_workflow_service(CONFIG.agent_root, payload))
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path in {"/research-os/files/register", "/research-os/files/upload"}:
+            try:
+                json_response(
+                    self,
+                    200,
+                    {"artifact": research_os.register_file_artifact(CONFIG.agent_root, payload, allow_external_source=path == "/research-os/files/upload")},
+                )
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/research-os/files/") and path.endswith("/ingest"):
+            artifact_id = urllib.parse.unquote(path.split("/")[3])
+            try:
+                json_response(self, 200, {"artifact": research_os.ingest_registered_artifact(CONFIG.agent_root, artifact_id, payload)})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path.startswith("/research-os/files/") and path.endswith("/delete"):
+            artifact_id = urllib.parse.unquote(path.split("/")[3])
+            try:
+                json_response(self, 200, {"artifact": research_os.delete_registered_artifact(CONFIG.agent_root, artifact_id, payload)})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
+        if path == "/research-os/artifacts":
+            try:
+                json_response(self, 200, {"artifact": research_os.archive_project_artifact(CONFIG.agent_root, payload)})
+            except Exception as exc:
+                handle_error(self, exc)
+            return
+
         if path == "/research-os/extraction":
             try:
                 json_response(self, 200, research_os.run_extraction(CONFIG.agent_root, payload))
@@ -1985,7 +2108,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/research-os/memory/merge":
             try:
-                json_response(self, 200, {"memory": research_os.merge_memory_entities(CONFIG.agent_root, payload["target_id"], payload.get("source_ids") or [])})
+                json_response(self, 200, {"memory": research_os.merge_memory_entities(CONFIG.agent_root, payload["target_id"], payload.get("source_ids") or [], str(payload.get("project_id") or ""))})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2028,7 +2151,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/workflows/") and path.endswith("/run"):
             workflow_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, research_os.run_workflow(CONFIG.agent_root, workflow_id))
+                json_response(self, 200, research_os.run_workflow(CONFIG.agent_root, workflow_id, project_id=str(payload.get("project_id") or "")))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2058,7 +2181,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/reports/") and path.endswith("/claims"):
             report_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, research_os.generate_claims_from_report(CONFIG.agent_root, report_id))
+                json_response(self, 200, research_os.generate_claims_from_report(CONFIG.agent_root, report_id, str(payload.get("project_id") or "")))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2226,9 +2349,9 @@ class Handler(BaseHTTPRequestHandler):
                 reference = None
                 if isinstance(tags, list):
                     for tag in tags:
-                        reference = research_os.add_reference_tag(CONFIG.agent_root, reference_id, str(tag))
+                        reference = research_os.add_reference_tag(CONFIG.agent_root, reference_id, str(tag), str(payload.get("project_id") or ""))
                 else:
-                    reference = research_os.add_reference_tag(CONFIG.agent_root, reference_id, str(payload.get("tag") or payload.get("name") or ""))
+                    reference = research_os.add_reference_tag(CONFIG.agent_root, reference_id, str(payload.get("tag") or payload.get("name") or ""), str(payload.get("project_id") or ""))
                 json_response(self, 200, {"reference": reference})
             except Exception as exc:
                 handle_error(self, exc)
@@ -2237,7 +2360,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/references/") and (path.endswith("/note") or path.endswith("/notes")):
             reference_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"reference": research_os.add_reference_note(CONFIG.agent_root, reference_id, str(payload.get("note") or payload.get("content") or ""))})
+                json_response(self, 200, {"reference": research_os.add_reference_note(CONFIG.agent_root, reference_id, str(payload.get("note") or payload.get("content") or ""), str(payload.get("project_id") or ""))})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2275,21 +2398,21 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/research-os/rag/query":
             try:
-                json_response(self, 200, research_os.query_research_rag(CONFIG.agent_root, payload))
+                json_response(self, 200, research_os.query_research_rag(CONFIG.agent_root, {**payload, "retrieval_scope": "current_project", "cross_project": False}))
             except Exception as exc:
                 handle_error(self, exc)
             return
 
         if path == "/research-os/research-context/query":
             try:
-                json_response(self, 200, canonical_memory.query_research_context(CONFIG.agent_root, payload))
+                json_response(self, 200, canonical_memory.query_research_context(CONFIG.agent_root, {**payload, "retrieval_scope": "current_project", "cross_project": False}))
             except Exception as exc:
                 handle_error(self, exc)
             return
 
         if path == "/research-os/memory/context":
             try:
-                json_response(self, 200, canonical_memory.build_research_memory_context(CONFIG.agent_root, payload))
+                json_response(self, 200, canonical_memory.build_research_memory_context(CONFIG.agent_root, {**payload, "retrieval_scope": "current_project", "cross_project": False}))
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2404,7 +2527,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/agent-feed/") and path.endswith("/accept"):
             item_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"item": research_os.update_agent_inbox_item(CONFIG.agent_root, item_id, {"status": "accepted"})})
+                json_response(self, 200, {"item": research_os.update_agent_inbox_item(CONFIG.agent_root, item_id, {"project_id": payload.get("project_id"), "status": "accepted"})})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2412,7 +2535,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/research-os/agent-feed/") and path.endswith("/dismiss"):
             item_id = urllib.parse.unquote(path.split("/")[3])
             try:
-                json_response(self, 200, {"item": research_os.update_agent_inbox_item(CONFIG.agent_root, item_id, {"status": "dismissed"})})
+                json_response(self, 200, {"item": research_os.update_agent_inbox_item(CONFIG.agent_root, item_id, {"project_id": payload.get("project_id"), "status": "dismissed"})})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2517,7 +2640,7 @@ class Handler(BaseHTTPRequestHandler):
                 memory_id = payload.get("memory_id") or payload.get("id")
                 if not memory_id:
                     raise ValueError("memory_id is required")
-                json_response(self, 200, {"memory": memory_api.archive_memory(CONFIG.agent_root, str(memory_id))})
+                json_response(self, 200, {"memory": memory_api.archive_memory(CONFIG.agent_root, str(memory_id), str(payload.get("project_id") or ""))})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2573,7 +2696,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/memory/data-files/link-experiment":
             try:
-                json_response(self, 200, {"data_file": memory_api.link_file_to_experiment(CONFIG.agent_root, payload["file_id"], payload["experiment_id"])})
+                json_response(self, 200, {"data_file": memory_api.link_file_to_experiment(CONFIG.agent_root, payload["file_id"], payload["experiment_id"], payload["project_id"])})
             except Exception as exc:
                 handle_error(self, exc)
             return
@@ -2803,7 +2926,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/memory/"):
                 memory_id = path.split("/")[2]
-                json_response(self, 200, memory_api.delete_memory(CONFIG.agent_root, memory_id))
+                query = urllib.parse.parse_qs(parsed.query)
+                json_response(self, 200, memory_api.delete_memory(CONFIG.agent_root, memory_id, query.get("project_id", [""])[0]))
                 return
             if path.startswith("/research-interests/"):
                 interest_id = path.split("/")[2]
@@ -2824,6 +2948,7 @@ class Handler(BaseHTTPRequestHandler):
                         project_id,
                         dry_run=query.get("dry_run", ["false"])[0].lower() in {"1", "true", "yes", "on"},
                         confirmation=query.get("confirmation", [""])[0],
+                        confirm=query.get("confirm", ["false"])[0].lower() in {"1", "true", "yes", "on"},
                     ),
                 )
                 return

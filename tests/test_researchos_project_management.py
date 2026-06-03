@@ -108,16 +108,18 @@ class ResearchOSProjectManagementTests(unittest.TestCase):
         self.assertIn("deletion_plan", result)
         self.assertEqual(ros.get_project_status(self.agent_root, self.project_id)["status"], "active")
 
-    def test_purge_project_with_confirmation_marks_project_purged_and_hides_from_default_list(self) -> None:
+    def test_purge_project_with_confirmation_deletes_project_index_record(self) -> None:
         result = ros.purge_project(
             self.agent_root,
             self.project_id,
             confirmation="CONFIRM PURGE Project Ops Demo",
             confirmed_by_user="unit-test",
+            confirm=True,
         )
 
         self.assertTrue(result["executed"])
-        self.assertEqual(ros.get_project_status(self.agent_root, self.project_id)["status"], "purged")
+        with self.assertRaisesRegex(KeyError, "project not found"):
+            ros.get_project_status(self.agent_root, self.project_id)
         grouped = ros.list_projects_grouped(self.agent_root)
         self.assertFalse(any(item["display_name"] == "Project Ops Demo" for item in grouped["active"] + grouped["archived"]))
 

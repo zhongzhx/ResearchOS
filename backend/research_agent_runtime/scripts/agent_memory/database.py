@@ -132,6 +132,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS protocols (
             id TEXT PRIMARY KEY,
             group_id TEXT,
+            project_id TEXT,
             name TEXT,
             version TEXT,
             purpose TEXT,
@@ -195,4 +196,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_files_project ON data_files(project_id);
         """
     )
+    protocol_columns = {row[1] for row in conn.execute("PRAGMA table_info(protocols)").fetchall()}
+    if "project_id" not in protocol_columns:
+        conn.execute("ALTER TABLE protocols ADD COLUMN project_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_protocols_project ON protocols(project_id)")
     conn.commit()

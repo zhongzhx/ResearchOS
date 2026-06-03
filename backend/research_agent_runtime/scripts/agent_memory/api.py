@@ -29,6 +29,13 @@ from .samples import update_sample as _update_sample
 from .views import get_current_project_view as _get_current_project_view
 
 
+def _require_project_id(value: Any) -> str:
+    project_id = str(value or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
+    return project_id
+
+
 def create_group(agent_root: Path, data: dict[str, Any]) -> dict[str, Any]:
     return _create_group(agent_root, data)
 
@@ -41,21 +48,22 @@ def update_memory(agent_root: Path, memory_id: str, patch: dict[str, Any]) -> di
     return _update_memory(agent_root, memory_id, patch)
 
 
-def archive_memory(agent_root: Path, memory_id: str) -> dict[str, Any]:
-    return _archive_memory(agent_root, memory_id)
+def archive_memory(agent_root: Path, memory_id: str, project_id: str) -> dict[str, Any]:
+    return _archive_memory(agent_root, memory_id, _require_project_id(project_id))
 
 
-def delete_memory(agent_root: Path, memory_id: str) -> dict[str, Any]:
-    return _delete_memory(agent_root, memory_id)
+def delete_memory(agent_root: Path, memory_id: str, project_id: str) -> dict[str, Any]:
+    return _delete_memory(agent_root, memory_id, _require_project_id(project_id))
 
 
 def retrieve_memory(agent_root: Path, filters: dict[str, Any]) -> list[dict[str, Any]]:
+    project_id = _require_project_id(filters.get("project_id"))
     return _retrieve_memory(
         agent_root,
         user_id=filters.get("user_id", ""),
         group_id=filters.get("group_id"),
         query=filters.get("query"),
-        project_id=filters.get("project_id"),
+        project_id=project_id,
         experiment_id=filters.get("experiment_id"),
         memory_types=filters.get("memory_types"),
         entities=filters.get("entities"),
@@ -67,22 +75,24 @@ def retrieve_memory(agent_root: Path, filters: dict[str, Any]) -> list[dict[str,
 
 
 def build_memory_context(agent_root: Path, payload: dict[str, Any]) -> str:
+    project_id = _require_project_id(payload.get("project_id"))
     return _build_memory_context(
         agent_root,
         user_id=payload.get("user_id", "local_user"),
         group_id=payload.get("group_id"),
-        project_id=payload.get("project_id"),
+        project_id=project_id,
         query=payload.get("query") or payload.get("question") or "",
         max_tokens=int(payload.get("max_tokens") or 1500),
     )
 
 
 def consolidate_memory(agent_root: Path, filters: dict[str, Any]) -> dict[str, Any]:
+    project_id = _require_project_id(filters.get("project_id"))
     return _consolidate_memory(
         agent_root,
         user_id=filters.get("user_id", "local_user"),
         group_id=filters.get("group_id"),
-        project_id=filters.get("project_id"),
+        project_id=project_id,
     )
 
 
@@ -126,16 +136,16 @@ def link_file_to_project(agent_root: Path, file_id: str, project_id: str) -> dic
     return _link_file_to_project(agent_root, file_id, project_id)
 
 
-def link_file_to_experiment(agent_root: Path, file_id: str, experiment_id: str) -> dict[str, Any]:
-    return _link_file_to_experiment(agent_root, file_id, experiment_id)
+def link_file_to_experiment(agent_root: Path, file_id: str, experiment_id: str, project_id: str) -> dict[str, Any]:
+    return _link_file_to_experiment(agent_root, file_id, experiment_id, _require_project_id(project_id))
 
 
 def list_project_memory(agent_root: Path, project_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
     return _list_project_memory(agent_root, project_id, include_archived=include_archived)
 
 
-def list_experiment_memory(agent_root: Path, experiment_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
-    return _list_experiment_memory(agent_root, experiment_id, include_archived=include_archived)
+def list_experiment_memory(agent_root: Path, experiment_id: str, project_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
+    return _list_experiment_memory(agent_root, experiment_id, _require_project_id(project_id), include_archived=include_archived)
 
 
 def get_current_project_view(agent_root: Path, project_id: str) -> dict[str, Any] | None:
@@ -147,7 +157,9 @@ def extract_memory_candidates(input_text: str, context: dict[str, Any] | None = 
 
 
 def extract_and_queue_if_needed(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    candidate = extract_memory_candidates(payload.get("input_text") or payload.get("text") or "", payload.get("context") or {})
+    project_id = _require_project_id(payload.get("project_id"))
+    context = {**(payload.get("context") or {}), "project_id": project_id}
+    candidate = extract_memory_candidates(payload.get("input_text") or payload.get("text") or "", context)
     review = None
     if candidate.get("needs_review") or float(candidate.get("confidence", 0.0)) < 0.6:
         review = enqueue_review(

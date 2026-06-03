@@ -26,6 +26,10 @@ REQUIRED = [
     WEB / "components" / "details.js",
     WEB / "components" / "status_pill.js",
     WEB / "components" / "empty_state.js",
+    WEB / "components" / "artifact_card.js",
+    WEB / "components" / "workflow_card.js",
+    WEB / "components" / "project_status_card.js",
+    WEB / "components" / "developer_details.js",
     WEB / "components" / "project_switcher.js",
     WEB / "components" / "json_viewer.js",
 ]

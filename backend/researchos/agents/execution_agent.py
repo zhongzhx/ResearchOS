@@ -11,6 +11,7 @@ from backend.researchos.execution.skill_dispatcher import validate_required_skil
 from backend.researchos.execution.task_runner import build_execution_plan, collect_task_outputs, run_execution_plan
 from backend.researchos.execution.tool_dispatcher import validate_allowed_tool
 from backend.researchos.skills.runtime_skill_loader import build_execution_skill_context, load_selected_skill_docs
+from backend.researchos.workspace.file_artifact_registry import FileArtifactRegistry
 
 
 class ResearchExecutionAgent:
@@ -136,7 +137,9 @@ class ResearchExecutionAgent:
             result.status = "partial_success"
             result.unresolved_items = validation_report["issues"]
         result.skillrun_id = self.write_skillrun_record(task_spec, result.structured_outputs, result.logs, "completed" if result.status in {"success", "partial_success"} else "failed", result=result)
-        self._register_output_artifacts(task_spec, result)
+        registered_paths = self._register_output_artifacts(task_spec, result)
+        if registered_paths:
+            result.output_files = registered_paths
         return result
 
     def select_execution_plan(self, task_spec: TaskSpec) -> dict[str, Any]:
@@ -204,24 +207,30 @@ class ResearchExecutionAgent:
         )
         return run["id"]
 
-    def _register_output_artifacts(self, task_spec: TaskSpec, result: ExecutionResult) -> None:
+    def _register_output_artifacts(self, task_spec: TaskSpec, result: ExecutionResult) -> list[str]:
         if not task_spec.project_id or not result.output_files:
-            return
-        ros = import_research_os_mvp()
+            return []
+        registry = FileArtifactRegistry(self.agent_root)
+        registered_paths = []
         for output_path in result.output_files:
-            ros.register_artifact(
-                self.agent_root,
-                {
-                    "project_id": task_spec.project_id,
-                    "task_id": task_spec.task_id,
-                    "skill_run_id": result.skillrun_id or "",
-                    "source_skill_run_id": result.skillrun_id or "",
-                    "type": "skill_output",
-                    "title": Path(output_path).name,
-                    "path": output_path,
-                    "source_object_type": "output_file",
-                    "source_object_id": output_path,
-                    "status": "created" if result.status in {"success", "partial_success"} else "failed",
-                    "metadata": {"task_type": task_spec.task_type, "provenance": {"task_id": task_spec.task_id, "skill_run_id": result.skillrun_id}},
-                },
+            path = Path(output_path)
+            source_type = {
+                ".md": "generated_markdown",
+                ".pptx": "generated_pptx",
+                ".svg": "generated_figure",
+                ".png": "generated_figure",
+                ".csv": "generated_table",
+            }.get(path.suffix.lower(), "workflow_run_artifact")
+            artifact = registry.register_file(
+                project_id=task_spec.project_id,
+                source_type=source_type,
+                file_path=path,
+                display_name=path.name,
+                run_id=result.skillrun_id or "",
+                status="generated" if result.status in {"success", "partial_success"} else "failed",
+                ingest_status="generated" if result.status in {"success", "partial_success"} else "failed",
+                metadata={"task_type": task_spec.task_type, "provenance": {"task_id": task_spec.task_id, "skill_run_id": result.skillrun_id}},
+                allow_external_source=True,
             )
+            registered_paths.append(artifact["absolute_path"])
+        return registered_paths

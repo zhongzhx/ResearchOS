@@ -11,6 +11,9 @@ from backend.researchos.execution.runtime_adapter import default_agent_root, imp
 
 
 def _ensure_project(project_id: str) -> str:
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
     ros = import_research_os_mvp()
     agent_root = default_agent_root()
     try:
@@ -21,7 +24,7 @@ def _ensure_project(project_id: str) -> str:
         return project["id"]
 
 
-def run_demo_pdf_evidence_flow(project_id: str = "demo_project") -> dict[str, Any]:
+def run_demo_pdf_evidence_flow(project_id: str) -> dict[str, Any]:
     project_id = _ensure_project(project_id)
     agent_root = default_agent_root()
     execution = ResearchExecutionAgent(agent_root=agent_root)

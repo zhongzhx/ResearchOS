@@ -57,6 +57,18 @@ const welcomeMessage = {
   mascotState: "greeting",
 };
 
+function resetChatForProjectSwitch() {
+  chatMessages = [];
+  pendingWorkflow = null;
+  activeFeedbackState = "";
+  loadedProjectId = "";
+  loadedConversationId = "";
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener?.("researchos:active-project-changed", resetChatForProjectSwitch);
+}
+
 function renderMessages() {
   const visibleMessages = chatMessages.length ? chatMessages : [welcomeMessage];
   return visibleMessages
@@ -295,14 +307,14 @@ async function executePendingWorkflow(root) {
   const workflow = { ...pendingWorkflow, status: "confirmed", linked_conversation_id: conversationId };
   pendingWorkflow = null;
   activeFeedbackState = "working";
-  saveWorkflowHistory(activeProjectId, workflowHistoryRecord(workflow, { status: "running", result_summary: "任务已确认，正在执行。" }));
+  saveWorkflowHistory(activeProjectId, workflowHistoryRecord(workflow, { status: "submitting", result_summary: "任务已确认，正在请求后端创建 workflow run。" }));
   addMessage({
     role: "assistant",
     type: "workflow_result",
     result: {
-      status: "running",
-      title: "已开始任务",
-      message: "我已收到确认，正在提交任务。",
+      status: "submitting",
+      title: "正在提交任务",
+      message: "我已收到确认，正在请求后端创建 workflow run；收到 run_id 后才会显示为已开始。",
       steps: ["确认参数", "提交任务"],
     },
   });

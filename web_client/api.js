@@ -1,7 +1,6 @@
 const BACKEND_PREFIX = "/api/backend";
 const REQUEST_TIMEOUT_MS = 8000;
 const MUTATION_TIMEOUT_MS = 60000;
-export const DEFAULT_PROJECT_ID = "default";
 const DEFAULT_CHAT_SESSION_ID = "default-chat-session";
 
 function safeError(error) {
@@ -23,7 +22,7 @@ function makeQuery(params = {}) {
 }
 
 function withProject(path, projectId, params = {}) {
-  return `${path}${makeQuery({ project_id: projectId, ...params })}`;
+  return `${path}${makeQuery({ project_id: requireProjectId(projectId), ...params })}`;
 }
 
 function stableId(value, fallback) {
@@ -31,12 +30,22 @@ function stableId(value, fallback) {
   return normalized || fallback;
 }
 
+export function requireProjectId(projectId) {
+  const normalized = String(projectId || "").trim();
+  if (!normalized) throw new Error("project_id is required");
+  return normalized;
+}
+
+function projectPath(projectId, suffix = "") {
+  return `/research-os/projects/${encodeURIComponent(requireProjectId(projectId))}${suffix}`;
+}
+
 function defaultChatSessionId(projectId) {
-  const normalizedProjectId = String(projectId || DEFAULT_PROJECT_ID)
+  const normalizedProjectId = requireProjectId(projectId)
     .trim()
     .replace(/[^A-Za-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `${DEFAULT_CHAT_SESSION_ID}-${normalizedProjectId || DEFAULT_PROJECT_ID}`;
+  return `${DEFAULT_CHAT_SESSION_ID}-${normalizedProjectId}`;
 }
 
 async function request(method, path, body, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -110,14 +119,17 @@ export function apiDelete(path) {
 // legacy_stable: MVP runtime and ResearchOS local data APIs.
 export const getHealth = () => apiGet("/health");
 export const getProjects = () => apiGet("/research-os/projects");
+export const getProjectStatus = (projectId) => apiGet(projectPath(projectId, "/status"));
+export const getProjectPaths = (projectId) => apiGet(projectPath(projectId, "/paths"));
+export const getWorkspaceState = (projectId) => apiGet(withProject("/research-os/workspace-state", projectId));
 export const getTasks = (projectId) => apiGet(withProject("/research-os/tasks", projectId, { limit: 100 }));
-export const getTask = (taskId) => apiGet(`/research-os/tasks/${encodeURIComponent(taskId)}`);
+export const getTask = (projectId, taskId) => apiGet(withProject(`/research-os/tasks/${encodeURIComponent(taskId)}`, projectId));
 export const getReferences = (projectId, search = "") => apiGet(withProject("/research-os/references", projectId, { search, limit: 100 }));
 export const getMemoryContext = (projectId, query = "Current project summary") =>
   apiGet(withProject("/research-os/memory/context", projectId, { query, limit: 30 }));
 export const getMemoryReviewQueue = (projectId) => apiGet(withProject("/research-os/memory/review-queue", projectId, { status: "pending" }));
 export const sendLegacyChat = (message, projectId, conversationId = "", sessionId = "") => {
-  const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID);
+  const safeProjectId = requireProjectId(projectId);
   const safeConversationId = stableId(conversationId, stableId(sessionId, defaultChatSessionId(safeProjectId)));
   const safeSessionId = stableId(sessionId, safeConversationId);
   return apiPost("/research-os/agent/chat", {
@@ -130,7 +142,7 @@ export const sendLegacyChat = (message, projectId, conversationId = "", sessionI
 
 // Internal coordinator entry; only call after the user enables developer controls.
 export const runCoordinator = (userQuery, projectId, conversationId = "", sessionId = "") => {
-  const safeProjectId = stableId(projectId, DEFAULT_PROJECT_ID);
+  const safeProjectId = requireProjectId(projectId);
   const safeConversationId = stableId(conversationId, stableId(sessionId, defaultChatSessionId(safeProjectId)));
   const safeSessionId = stableId(sessionId, safeConversationId);
   return apiPost("/api/agents/coordinator/run", {
@@ -181,34 +193,52 @@ export const getProtocols = (projectId) => apiGet(withProject("/research-os/prot
 export const getReports = (projectId) => apiGet(withProject("/research-os/reports", projectId));
 export const getRelationships = (projectId) => apiGet(withProject("/research-os/relationships", projectId));
 export const getFiles = (projectId) => apiGet(withProject("/research-os/files", projectId));
-export const getEvidenceReview = (projectId) => apiGet(`/research-os/projects/${encodeURIComponent(projectId || "")}/evidence-review`);
-export const getClaimReview = (projectId) => apiGet(`/research-os/projects/${encodeURIComponent(projectId || "")}/claims/review`);
+export const getProjectArtifacts = (projectId, sourceType = "") => apiGet(projectPath(projectId, `/artifacts${makeQuery({ source_type: sourceType })}`));
+export const getArtifactOpenInfo = (projectId, artifactId) => apiGet(projectPath(projectId, `/artifacts/${encodeURIComponent(artifactId)}/open-info`));
+export const registerArtifactFile = (payload) => apiPost("/research-os/files/register", payload);
+export const uploadArtifactFile = (payload) => apiPost("/research-os/files/upload", payload);
+export const ingestArtifactFile = (projectId, artifactId, payload = {}) =>
+  apiPost(`/research-os/files/${encodeURIComponent(artifactId)}/ingest`, { ...payload, project_id: requireProjectId(projectId) });
+export const deleteArtifactFile = (projectId, artifactId, payload = {}) =>
+  apiPost(`/research-os/files/${encodeURIComponent(artifactId)}/delete`, { ...payload, project_id: requireProjectId(projectId) });
+export const getWorkflowRegistry = () => apiGet("/research-os/workflow-registry");
+export const planWorkflowExecution = (payload) => apiPost("/research-os/workflow-executions/plan", payload);
+export const executeWorkflowExecution = (payload) => apiPost("/research-os/workflow-executions", payload);
+export const routeChatWorkflow = (payload) => apiPost("/research-os/workflow-executions/chat-route", payload);
+export const getEvidenceReview = (projectId) => apiGet(projectPath(projectId, "/evidence-review"));
+export const getClaimReview = (projectId) => apiGet(projectPath(projectId, "/claims/review"));
 export const getRuntimeStatus = (projectId) => apiGet(withProject("/research-os/runtime/status", projectId));
 export const getSchedulerStatus = (projectId) => apiGet(withProject("/research-os/agent/scheduler/status", projectId));
 export const getDashboard = () => apiGet("/research-os/dashboard");
 
 // legacy_stable: project/task lifecycle mutations backed by research_os_mvp.
 export const createProject = (payload) => apiPost("/research-os/projects", payload);
-export const updateProject = (projectId, payload) => apiPut(`/research-os/projects/${encodeURIComponent(projectId)}`, payload);
-export const archiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/archive`, {});
-export const unarchiveProject = (projectId) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/unarchive`, {});
-export const clearProject = (projectId, payload = {}) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/clear`, payload);
-export const purgeProject = (projectId, payload = {}) => apiPost(`/research-os/projects/${encodeURIComponent(projectId)}/purge`, payload);
+export const archiveProjectArtifact = (payload) => apiPost("/research-os/artifacts", payload);
+export const updateProject = (projectId, payload) => apiPut(projectPath(projectId), payload);
+export const archiveProject = (projectId) => apiPost(projectPath(projectId, "/archive"), {});
+export const unarchiveProject = (projectId) => apiPost(projectPath(projectId, "/unarchive"), {});
+export const clearProject = (projectId, payload = {}) => apiPost(projectPath(projectId, "/clear"), payload);
+export const purgeProject = (projectId, payload = {}) => apiPost(projectPath(projectId, "/purge"), payload);
 export const createTask = (payload) => apiPost("/research-os/tasks", payload);
-export const runTask = (taskId, payload = {}) => apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/run`, payload);
-export const cancelTask = (taskId, payload = {}) => apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/cancel`, payload);
+export const runTask = (projectId, taskId, payload = {}) =>
+  apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/run`, { ...payload, project_id: requireProjectId(projectId) });
+export const cancelTask = (projectId, taskId, payload = {}) =>
+  apiPost(`/research-os/tasks/${encodeURIComponent(taskId)}/cancel`, { ...payload, project_id: requireProjectId(projectId) });
 export const parseNaturalLanguageTask = (payload) => apiPost("/research-os/tasks/parse-natural-language", payload);
 export const createTaskFromNaturalLanguage = (payload) => apiPost("/research-os/tasks/create-from-natural-language", payload);
 export const agentHeartbeat = (payload = {}) => apiPost("/agent/messages", payload);
 export const watchProject = (payload) => apiPost("/research-os/agent/watch-project", payload);
 export const runScheduler = (payload = {}) => apiPost("/research-os/agent/scheduler/run", payload);
-export const acceptAgentFeedItem = (itemId) => apiPost(`/research-os/agent-feed/${encodeURIComponent(itemId)}/accept`, {});
-export const dismissAgentFeedItem = (itemId) => apiPost(`/research-os/agent-feed/${encodeURIComponent(itemId)}/dismiss`, {});
+export const acceptAgentFeedItem = (projectId, itemId) =>
+  apiPost(`/research-os/agent-feed/${encodeURIComponent(itemId)}/accept`, { project_id: requireProjectId(projectId) });
+export const dismissAgentFeedItem = (projectId, itemId) =>
+  apiPost(`/research-os/agent-feed/${encodeURIComponent(itemId)}/dismiss`, { project_id: requireProjectId(projectId) });
 export const getLegacySkills = () => apiGet("/research-os/skills");
 export const upsertLegacySkill = (payload) => apiPost("/research-os/skills", payload);
 export const runLegacySkill = (skillId, payload = {}) => apiPost(`/research-os/skills/${encodeURIComponent(skillId)}/run`, payload);
 export const simulatePromptRouting = (payload) => apiPost("/research-os/prompt-routing/simulate", payload);
-export const promoteExecutionMemory = (memoryId, payload = {}) => apiPost(`/research-os/execution-memory/${encodeURIComponent(memoryId)}/promote`, payload);
+export const promoteExecutionMemory = (projectId, memoryId, payload = {}) =>
+  apiPost(`/research-os/execution-memory/${encodeURIComponent(memoryId)}/promote`, { ...payload, project_id: requireProjectId(projectId) });
 
 // legacy_stable: RAG, literature, reference, and evidence read APIs.
 export const getReferenceChunks = (projectId) => apiGet(withProject("/research-os/reference-chunks", projectId, { limit: 100 }));
@@ -227,7 +257,8 @@ export const testLlmSettings = (payload) => apiPost("/api/settings/llm/test", pa
 
 // legacy_stable: RAG, literature, reference, and evidence mutation APIs.
 export const createLiteratureSearchTask = (payload) => apiPost("/research-os/literature/search-tasks", payload);
-export const cancelLiteratureSearchTask = (taskId) => apiPost(`/research-os/literature/search-tasks/${encodeURIComponent(taskId)}/cancel`, {});
+export const cancelLiteratureSearchTask = (projectId, taskId) =>
+  apiPost(`/research-os/literature/search-tasks/${encodeURIComponent(taskId)}/cancel`, { project_id: requireProjectId(projectId) });
 export const expandLiteratureQuery = (payload) => apiPost("/research-os/literature/expand-query", payload);
 export const mineLiteratureKeywords = (payload) => apiPost("/research-os/literature/keyword-mine", payload);
 export const runLiteratureSearch = (payload) => apiPost("/research-os/literature/search", payload);
@@ -235,11 +266,16 @@ export const createPaperRequest = (payload) => apiPost("/research-os/literature/
 export const generatePaperRequests = (payload) => apiPost("/research-os/literature/paper-requests/generate", payload);
 export const processPaperRequestWatchFolder = (payload) => apiPost("/research-os/literature/paper-requests/process-watch-folder", payload);
 export const upsertReference = (payload) => apiPost("/research-os/references", payload);
-export const tagReference = (referenceId, payload) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/tag`, payload);
-export const noteReference = (referenceId, payload) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/note`, payload);
-export const markReferenceImportant = (referenceId, payload = {}) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/mark-important`, payload);
-export const excludeReference = (referenceId, payload = {}) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/exclude`, payload);
-export const linkReference = (referenceId, payload) => apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/link`, payload);
+export const tagReference = (projectId, referenceId, payload) =>
+  apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/tag`, { ...payload, project_id: requireProjectId(projectId) });
+export const noteReference = (projectId, referenceId, payload) =>
+  apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/note`, { ...payload, project_id: requireProjectId(projectId) });
+export const markReferenceImportant = (projectId, referenceId, payload = {}) =>
+  apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/mark-important`, { ...payload, project_id: requireProjectId(projectId) });
+export const excludeReference = (projectId, referenceId, payload = {}) =>
+  apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/exclude`, { ...payload, project_id: requireProjectId(projectId) });
+export const linkReference = (projectId, referenceId, payload) =>
+  apiPost(`/research-os/references/${encodeURIComponent(referenceId)}/link`, { ...payload, project_id: requireProjectId(projectId) });
 export const buildKnowledgeBase = (payload) => apiPost("/research-os/knowledge-base/build", payload);
 
 function workflowPrompt(intent, params) {
@@ -285,7 +321,7 @@ function manualQueueCount(result) {
 }
 
 export async function executeConfirmedWorkflow(intent, params = {}, context = {}) {
-  const projectId = params.project_id || context.projectId || DEFAULT_PROJECT_ID;
+  const projectId = requireProjectId(params.project_id || context.projectId);
   if (intent === "literature_harvest_and_kb") {
     const payload = {
       project_id: projectId,
@@ -308,10 +344,11 @@ export async function executeConfirmedWorkflow(intent, params = {}, context = {}
     }
     return {
       ok: true,
-      status: "success",
+      status: "completed",
       intent,
-      title: "文献采集已开始",
-      message: "已创建文献采集任务，并完成可用步骤的提交。",
+      title: "文献采集步骤已完成",
+      message: "已创建文献采集任务，并完成当前可执行步骤。",
+      run_id: createTask.data?.id || createTask.data?.task_id || "",
       steps: ["创建文献采集任务", "检索文献", "整理手动下载队列", params.build_kb === false ? "跳过知识库构建" : "构建知识库"],
       manual_queue_count: manualQueueCount(paperRequests),
       next_step: "你可以在资料库查看文献和知识条目，手动补充无法开放获取的全文。",
@@ -319,18 +356,23 @@ export async function executeConfirmedWorkflow(intent, params = {}, context = {}
     };
   }
 
-  const coordinator = await runCoordinator(workflowPrompt(intent, params), projectId, context.conversationId || "", context.sessionId || "");
-  if (!coordinator.ok) return workflowNotConnected(intent);
-  return {
-    ok: true,
-    status: "success",
+  const execution = await executeWorkflowExecution({
+    project_id: projectId,
     intent,
-    title: "任务已开始",
-    message: coordinator.data?.answer || coordinator.data?.message || "已把任务交给 Agent，后续结果会继续显示在对话中。",
-    steps: ["已确认参数", "已提交给 Agent"],
-    next_step: "等待 Agent 返回结果，或继续补充上下文。",
-    technical: coordinator.data,
-  };
+    params,
+    conversation_id: context.conversationId || "",
+  });
+  const result = execution?.data || {};
+  if (!execution.ok || !result.ok) {
+    return {
+      ...workflowNotConnected(intent, result.message || execution.error || "真实 workflow service 未返回可验证结果"),
+      status: result.status || "failed",
+      run_id: result.run_id || "",
+      artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
+      technical: result.developer_diagnostics || result,
+    };
+  }
+  return result;
 }
 export const queryResearchOsRag = (payload) => apiPost("/research-os/rag/query", payload);
 export const queryResearchContext = (payload) => apiPost("/research-os/research-context/query", payload);
@@ -345,18 +387,27 @@ export const storeProtocol = (payload) => apiPost("/research-os/protocols", payl
 export const generateExecutionPackage = (payload) => apiPost("/research-os/protocol-execution-package", payload);
 export const runCalculator = (payload) => apiPost("/research-os/calculator", payload);
 export const createWorkflow = (payload) => apiPost("/research-os/workflows", payload);
-export const runWorkflow = (workflowId, payload = {}) => apiPost(`/research-os/workflows/${encodeURIComponent(workflowId)}/run`, payload);
-export const approveWorkflowStep = (stepId, payload = {}) => apiPost(`/research-os/workflow-steps/${encodeURIComponent(stepId)}/approve`, payload);
+export const runWorkflow = (projectId, workflowId, payload = {}) =>
+  apiPost(`/research-os/workflows/${encodeURIComponent(workflowId)}/run`, { ...payload, project_id: requireProjectId(projectId) });
+export const approveWorkflowStep = (projectId, stepId, payload = {}) =>
+  apiPost(`/research-os/workflow-steps/${encodeURIComponent(stepId)}/approve`, { ...payload, project_id: requireProjectId(projectId) });
 export const detectConflicts = (payload) => apiPost("/research-os/conflicts/detect", payload);
 export const createReport = (payload) => apiPost("/research-os/reports", payload);
-export const extractReportClaims = (reportId, payload = {}) => apiPost(`/research-os/reports/${encodeURIComponent(reportId)}/claims`, payload);
+export const extractReportClaims = (projectId, reportId, payload = {}) =>
+  apiPost(`/research-os/reports/${encodeURIComponent(reportId)}/claims`, { ...payload, project_id: requireProjectId(projectId) });
 export const createClaim = (payload) => apiPost("/research-os/claims", payload);
-export const confirmClaim = (claimId, payload = {}) => apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/confirm`, payload);
-export const rejectClaim = (claimId, payload = {}) => apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/reject`, payload);
-export const requestMoreClaimEvidence = (claimId, payload = {}) => apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/needs-more-evidence`, payload);
-export const linkClaimEvidence = (claimId, payload) => apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/link-evidence`, payload);
-export const unlinkClaimEvidence = (claimId, payload) => apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/unlink-evidence`, payload);
-export const supersedeClaim = (claimId, payload) => apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/supersede`, payload);
+export const confirmClaim = (projectId, claimId, payload = {}) =>
+  apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/confirm`, { ...payload, project_id: requireProjectId(projectId) });
+export const rejectClaim = (projectId, claimId, payload = {}) =>
+  apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/reject`, { ...payload, project_id: requireProjectId(projectId) });
+export const requestMoreClaimEvidence = (projectId, claimId, payload = {}) =>
+  apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/needs-more-evidence`, { ...payload, project_id: requireProjectId(projectId) });
+export const linkClaimEvidence = (projectId, claimId, payload) =>
+  apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/link-evidence`, { ...payload, project_id: requireProjectId(projectId) });
+export const unlinkClaimEvidence = (projectId, claimId, payload) =>
+  apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/unlink-evidence`, { ...payload, project_id: requireProjectId(projectId) });
+export const supersedeClaim = (projectId, claimId, payload) =>
+  apiPost(`/research-os/claims/${encodeURIComponent(claimId)}/supersede`, { ...payload, project_id: requireProjectId(projectId) });
 export const queryRelationships = (payload) => apiPost("/research-os/relationships/query", payload);
 export const validateResearchOsPayload = (payload) => apiPost("/research-os/validator", payload);
 export const createClaimReferenceLink = (payload) => apiPost("/research-os/claim-reference-links", payload);

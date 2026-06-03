@@ -14,7 +14,9 @@ def _listify(value: Any) -> list[dict[str, Any]]:
 
 
 def persist_product_feature_lifecycle(feature_id: str, request_payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
-    project_id = str(request_payload.get("project_id") or result.get("project_id") or "demo_project")
+    project_id = str(request_payload.get("project_id") or result.get("project_id") or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
     query = str(request_payload.get("user_query") or request_payload.get("query") or result.get("summary") or feature_id)
     task_id = str(result.get("task_id") or "")
     store = ResearchTaskStateStore()

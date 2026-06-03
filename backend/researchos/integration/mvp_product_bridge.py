@@ -8,6 +8,7 @@ from backend.researchos.product.feature_flows import (
     run_product_feature as _run_product_feature,
     run_product_feature_demo as _run_product_feature_demo,
 )
+from backend.researchos.execution.runtime_adapter import default_agent_root, import_research_os_mvp
 from backend.researchos.settings.secret_store import redact_secrets_in_obj
 
 from .mvp_task_bridge import persist_product_feature_lifecycle
@@ -21,8 +22,17 @@ def get_product_feature(feature_id: str) -> dict[str, Any]:
     return redact_secrets_in_obj(_get_product_feature(feature_id))
 
 
+def _require_existing_project(payload: dict[str, Any]) -> str:
+    project_id = str(payload.get("project_id") or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
+    import_research_os_mvp().get_project_detail(default_agent_root(), project_id)
+    return project_id
+
+
 def run_product_feature(feature_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    payload = payload or {}
+    payload = dict(payload or {})
+    payload["project_id"] = _require_existing_project(payload)
     result = _run_product_feature(feature_id, payload)
     if result.get("ok") and result.get("status") != "disabled":
         lifecycle = persist_product_feature_lifecycle(feature_id, payload, result)
@@ -32,5 +42,5 @@ def run_product_feature(feature_id: str, payload: dict[str, Any] | None = None) 
     return redact_secrets_in_obj(result)
 
 
-def run_product_feature_demo(feature_id: str, project_id: str = "demo_project") -> dict[str, Any]:
+def run_product_feature_demo(feature_id: str, project_id: str) -> dict[str, Any]:
     return run_product_feature(feature_id, {"project_id": project_id, "mode": "demo"})

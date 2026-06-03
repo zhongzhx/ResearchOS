@@ -92,6 +92,11 @@ export async function renderRunsView({ root }) {
     <div class="page-scroll"><div class="panel pad" id="runsContent">${emptyState("正在加载运行记录", "正在读取执行状态。")}</div></div>
   </section>`;
 
+  if (!appState.activeProjectId) {
+    root.querySelector("#runsContent").innerHTML = emptyState("请先选择或创建项目", "运行记录严格限定在当前项目。");
+    return;
+  }
+
   const [tasks, skillRuns, memory, feed, board, runtime, scheduler] = await Promise.all([
     getTasks(appState.activeProjectId),
     getSkillRuns(appState.activeProjectId),
@@ -155,7 +160,7 @@ export async function renderRunsView({ root }) {
     button.addEventListener("click", async () => {
       const memoryId = button.dataset.promoteMemory;
       if (!confirm(`确认将执行记忆 ${memoryId} 加入研究记忆吗？`)) return;
-      const result = await promoteExecutionMemory(memoryId, { project_id: appState.activeProjectId });
+      const result = await promoteExecutionMemory(appState.activeProjectId, memoryId);
       promoteStatus = { ok: result.ok, message: result.ok ? "已加入研究记忆，正在刷新执行记忆和研究记忆状态。" : result.error || "加入研究记忆未完成" };
       await renderRunsView({ root });
     });

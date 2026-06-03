@@ -472,46 +472,61 @@ def sync_agent_memory_entry(agent_root: Path, entry: dict[str, Any]) -> dict[str
 
 
 def list_experiments(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect_research_db(agent_root)
     rows = conn.execute(
-        "SELECT * FROM experiments WHERE (?='' OR project_id=?) ORDER BY COALESCE(experiment_date, created_at) DESC, updated_at DESC",
-        (project_id, project_id),
+        "SELECT * FROM experiments WHERE project_id=? ORDER BY COALESCE(experiment_date, created_at) DESC, updated_at DESC",
+        (project_id,),
     ).fetchall()
     conn.close()
     return rows_to_dicts(rows)
 
 
 def list_samples(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect_research_db(agent_root)
     rows = conn.execute(
-        "SELECT * FROM samples WHERE (?='' OR project_id=?) ORDER BY COALESCE(sample_code, sample_id, name, id)",
-        (project_id, project_id),
+        "SELECT * FROM samples WHERE project_id=? ORDER BY COALESCE(sample_code, sample_id, name, id)",
+        (project_id,),
     ).fetchall()
     conn.close()
     return rows_to_dicts(rows)
 
 
 def list_data_files(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect_research_db(agent_root)
     rows = conn.execute(
-        "SELECT * FROM research_files WHERE (?='' OR project_id=?) ORDER BY imported_at DESC, updated_at DESC",
-        (project_id, project_id),
+        "SELECT * FROM research_files WHERE project_id=? ORDER BY imported_at DESC, updated_at DESC",
+        (project_id,),
     ).fetchall()
     conn.close()
     return rows_to_dicts(rows)
 
 
 def list_failures(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect_research_db(agent_root)
     rows = conn.execute(
-        "SELECT * FROM failure_logs WHERE (?='' OR project_id=?) ORDER BY updated_at DESC",
-        (project_id, project_id),
+        "SELECT * FROM failure_logs WHERE project_id=? ORDER BY updated_at DESC",
+        (project_id,),
     ).fetchall()
     conn.close()
     return rows_to_dicts(rows)
 
 
 def list_conclusions(agent_root: Path, project_id: str = "", status: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect_research_db(agent_root)
     clauses = ["1=1"]
     params: list[Any] = []
@@ -527,6 +542,9 @@ def list_conclusions(agent_root: Path, project_id: str = "", status: str = "") -
 
 
 def list_decisions(agent_root: Path, project_id: str = "", status: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect_research_db(agent_root)
     clauses = ["1=1"]
     params: list[Any] = []
@@ -1322,9 +1340,10 @@ def extract_experiment_memory(agent_root: Path, payload: dict[str, Any]) -> dict
 
 
 def list_memory_review_items(agent_root: Path, project_id: str = "", status: str = "pending") -> list[dict[str, Any]]:
-    items = list_review_queue(agent_root, user_id="", group_id="", status=status)
+    project_id = clean(project_id)
     if not project_id:
-        return items
+        raise ValueError("project_id is required")
+    items = list_review_queue(agent_root, user_id="", group_id="", status=status)
     filtered = []
     for item in items:
         candidate = item.get("candidate") or {}

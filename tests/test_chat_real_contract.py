@@ -68,11 +68,16 @@ class ChatRealContractTests(unittest.TestCase):
               return {{ ok: true, status: 200, text: async () => JSON.stringify({{ ok: true, answer: "ok" }}) }};
             }};
             const api = await import({API_JS.as_uri()!r});
-            await api.sendLegacyChat("你好", "", "conversation-1", "session-1");
+            let missingProjectError = "";
+            try {{
+              await api.sendLegacyChat("你好", "", "conversation-1", "session-1");
+            }} catch (error) {{
+              missingProjectError = error.message;
+            }}
             await api.runCoordinator("实验任务", "project-1", "conversation-2", "session-2");
             await api.runProductDemoFlow("project-3");
             const productRun = await api.runProductFeature("literature_harvest_workflow", {{ project_id: "project-4" }});
-            process.stdout.write(JSON.stringify({{ calls, productRun }}));
+            process.stdout.write(JSON.stringify({{ calls, productRun, missingProjectError }}));
             """
         )
 
@@ -80,23 +85,17 @@ class ChatRealContractTests(unittest.TestCase):
 
         result = json.loads(output)
         calls = result["calls"]
+        self.assertEqual(result["missingProjectError"], "project_id is required")
         self.assertEqual(calls[0]["method"], "POST")
-        self.assertTrue(calls[0]["url"].endswith("/research-os/agent/chat"))
-        self.assertEqual(calls[0]["body"]["message"], "你好")
-        self.assertEqual(calls[0]["body"]["project_id"], "default")
-        self.assertEqual(calls[0]["body"]["conversation_id"], "conversation-1")
-        self.assertEqual(calls[0]["body"]["session_id"], "session-1")
+        self.assertTrue(calls[0]["url"].endswith("/api/agents/coordinator/run"))
+        self.assertEqual(calls[0]["body"]["user_query"], "实验任务")
+        self.assertEqual(calls[0]["body"]["project_id"], "project-1")
+        self.assertEqual(calls[0]["body"]["conversation_id"], "conversation-2")
+        self.assertEqual(calls[0]["body"]["session_id"], "session-2")
 
-        self.assertEqual(calls[1]["method"], "POST")
-        self.assertTrue(calls[1]["url"].endswith("/api/agents/coordinator/run"))
-        self.assertEqual(calls[1]["body"]["user_query"], "实验任务")
-        self.assertEqual(calls[1]["body"]["project_id"], "project-1")
-        self.assertEqual(calls[1]["body"]["conversation_id"], "conversation-2")
-        self.assertEqual(calls[1]["body"]["session_id"], "session-2")
-
-        self.assertEqual(calls[2]["method"], "GET")
-        self.assertIn("/api/demo/product-flow?project_id=project-3", calls[2]["url"])
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[1]["method"], "GET")
+        self.assertIn("/api/demo/product-flow?project_id=project-3", calls[1]["url"])
+        self.assertEqual(len(calls), 2)
         self.assertEqual(result["productRun"]["data"]["status"], "not_connected")
 
     def test_default_conversation_ids_are_scoped_by_project(self) -> None:

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import research_os_mvp as ros
 import research_memory_canonical as canonical_memory
+from researchos_core_skills import CORE_SKILL_FOLDERS
 from runtime_paths import prompt_root
 
 
@@ -44,7 +45,7 @@ class ResearchOsMvpTests(unittest.TestCase):
                 "content": "sample_id,group,condition,dose,timepoint,assay,gene,fold_change\nS001,Model,LPS,100 ng/mL,24h,qPCR,IL6,5.2\n",
             },
         )
-        result = ros.run_extraction(self.agent_root, {"file_id": file_record["id"]})
+        result = ros.run_extraction(self.agent_root, {"project_id": self.project["id"], "file_id": file_record["id"]})
         self.assertTrue(result["entities"])
         memory = ros.search_memory(self.agent_root, {"project_id": self.project["id"], "query": "S001"})
         self.assertTrue(memory["memory"])
@@ -85,8 +86,8 @@ class ResearchOsMvpTests(unittest.TestCase):
                 "content": "sample_id,group,condition,dose,timepoint,assay,value\nS001,Treatment,LPS+NP-01,5 ug/mL,24h,ELISA,120\n",
             },
         )
-        ros.run_extraction(self.agent_root, {"file_id": first["id"]})
-        ros.run_extraction(self.agent_root, {"file_id": second["id"]})
+        ros.run_extraction(self.agent_root, {"project_id": self.project["id"], "file_id": first["id"]})
+        ros.run_extraction(self.agent_root, {"project_id": self.project["id"], "file_id": second["id"]})
         conflicts = ros.detect_conflicts(self.agent_root, self.project["id"])
         self.assertTrue(any("same sample ID" in item["conflict_type"] for item in conflicts))
 
@@ -95,7 +96,7 @@ class ResearchOsMvpTests(unittest.TestCase):
             self.agent_root,
             {"project_id": self.project["id"], "template_key": "protocol_to_execution"},
         )
-        result = ros.run_workflow(self.agent_root, workflow["id"])
+        result = ros.run_workflow(self.agent_root, workflow["id"], project_id=self.project["id"])
         self.assertIsNotNone(result["waiting_step"])
         self.assertEqual(result["waiting_step"]["status"], "waiting_approval")
 
@@ -135,7 +136,7 @@ class ResearchOsMvpTests(unittest.TestCase):
         )
         self.assertEqual(kit["assay_type"], "ELISA")
         self.assertTrue(kit["parsed_qc_rules"])
-        confirmed = ros.update_kit_template(self.agent_root, kit["id"], {"confirmed_by_user": True})
+        confirmed = ros.update_kit_template(self.agent_root, kit["id"], {"project_id": self.project["id"], "confirmed_by_user": True})
         self.assertTrue(confirmed["confirmed_by_user"])
 
     def test_data_context_marks_under_contextualized_files(self) -> None:
@@ -182,7 +183,7 @@ class ResearchOsMvpTests(unittest.TestCase):
         ros.add_claim_evidence(
             self.agent_root,
             claim["id"],
-            {"evidence_type": "source_file", "evidence_id": file_record["id"], "source_file_id": file_record["id"], "source_snippet": "Conclusion: signal is weak."},
+            {"project_id": self.project["id"], "evidence_type": "source_file", "evidence_id": file_record["id"], "source_file_id": file_record["id"], "source_snippet": "Conclusion: signal is weak."},
         )
         loaded = ros.get_claim_with_evidence(self.agent_root, claim["id"])
         self.assertEqual(loaded["evidence_count"], 1)
@@ -211,6 +212,7 @@ class ResearchOsMvpTests(unittest.TestCase):
             self.agent_root,
             context["id"],
             {
+                "project_id": self.project["id"],
                 "experiment_name": "Run 1",
                 "sample_source": "S001",
                 "assay_type": "qPCR",
@@ -233,7 +235,7 @@ class ResearchOsMvpTests(unittest.TestCase):
                 "content": "well,sample_id,group,condition,timepoint,assay,OD450\nA1,S001,Control,Vehicle,24h,ELISA,0.1\nA2,S002,Treatment,LPS,24h,ELISA,0.4\n",
             },
         )
-        ros.run_extraction(self.agent_root, {"file_id": file_record["id"]})
+        ros.run_extraction(self.agent_root, {"project_id": self.project["id"], "file_id": file_record["id"]})
         samples = ros.file_samples(self.agent_root, file_record["id"])["samples"]
         labels = {sample["sample_label"] for sample in samples}
         self.assertIn("S001", labels)
@@ -277,7 +279,7 @@ class ResearchOsMvpTests(unittest.TestCase):
     def test_imported_core_skills_are_registered_with_source_paths(self) -> None:
         skills = ros.list_skills(self.agent_root, include_disabled=True)
         core = [skill for skill in skills if skill["skill_id"].startswith("core_")]
-        self.assertEqual(len(core), 21)
+        self.assertEqual(len(core), len([folder for folder in CORE_SKILL_FOLDERS if not folder.startswith("nature-")]))
         self.assertTrue(all(skill["status"] in {"active", "draft", "duplicate", "deprecated"} for skill in core))
         self.assertTrue(all(skill.get("source_path", "").endswith("SKILL.md") for skill in core))
         scientific_paths = " ".join(str(skill.get("source_path") or "") for skill in skills)
@@ -326,7 +328,7 @@ class ResearchOsMvpTests(unittest.TestCase):
         )
         memories = ros.list_execution_memory(self.agent_root, project_id=self.project["id"], skill_id="core_manage_agent_memory")
         self.assertTrue(any(memory["skill_run_id"] == result["skill_run_id"] for memory in memories))
-        promoted = ros.promote_execution_memory_to_skill_draft(self.agent_root, memories[0]["id"], {"skill_name": "Draft Claim Strength Reporter"})
+        promoted = ros.promote_execution_memory_to_skill_draft(self.agent_root, memories[0]["id"], {"project_id": self.project["id"], "skill_name": "Draft Claim Strength Reporter"})
         self.assertEqual(promoted["skill"]["status"], "draft")
         scoped = ros.list_agent_memory(self.agent_root, scope="project", project_id=self.project["id"], include_disabled=True)
         self.assertTrue(scoped["project_memory"])
@@ -574,10 +576,10 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
             },
         )
         claim = ros.create_claim(self.agent_root, {"project_id": self.project["id"], "claim_text": "Mock-backed claim should not confirm.", "claim_type": "conclusion", "status": "weak"})
-        ros.add_claim_evidence(self.agent_root, claim["id"], {"evidence_type": "reference", "evidence_id": mock_ref["id"]})
+        ros.add_claim_evidence(self.agent_root, claim["id"], {"project_id": self.project["id"], "evidence_type": "reference", "evidence_id": mock_ref["id"]})
         gate = ros.evaluate_evidence_for_claim_confirmation(self.agent_root, claim["id"])
         self.assertFalse(gate["can_confirm"])
-        blocked = ros.confirm_claim(self.agent_root, claim["id"], {"confirmed_by": "pi"})
+        blocked = ros.confirm_claim(self.agent_root, claim["id"], {"project_id": self.project["id"], "confirmed_by": "pi"})
         self.assertEqual(blocked["status"], "blocked")
         self.assertTrue(blocked["confirmation"]["blockers"])
 
@@ -593,7 +595,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
             },
         )
         memory_claim = ros.create_claim(self.agent_root, {"project_id": self.project["id"], "claim_text": "Project memory alone should not confirm.", "claim_type": "conclusion", "status": "weak"})
-        ros.link_evidence_item_to_claim(self.agent_root, f"project_memory:{memory['id']}", {"claim_id": memory_claim["id"]})
+        ros.link_evidence_item_to_claim(self.agent_root, f"project_memory:{memory['id']}", {"project_id": self.project["id"], "claim_id": memory_claim["id"]})
         self.assertFalse(ros.evaluate_evidence_for_claim_confirmation(self.agent_root, memory_claim["id"])["can_confirm"])
 
         confirmed_memory = ros.create_agent_memory_entry(
@@ -608,7 +610,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
             },
         )
         confirmed_claim = ros.create_claim(self.agent_root, {"project_id": self.project["id"], "claim_text": "Human confirmed memory can support confirmation.", "claim_type": "result", "status": "weak"})
-        ros.link_evidence_item_to_claim(self.agent_root, f"project_memory:{confirmed_memory['id']}", {"claim_id": confirmed_claim["id"]})
+        ros.link_evidence_item_to_claim(self.agent_root, f"project_memory:{confirmed_memory['id']}", {"project_id": self.project["id"], "claim_id": confirmed_claim["id"]})
         self.assertTrue(ros.evaluate_evidence_for_claim_confirmation(self.agent_root, confirmed_claim["id"])["can_confirm"])
 
     def test_p2_real_reference_can_confirm_and_needs_more_evidence_status(self) -> None:
@@ -627,15 +629,15 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
             },
         )
         claim = ros.create_claim(self.agent_root, {"project_id": self.project["id"], "claim_text": "Real reference can support a cautious claim.", "claim_type": "conclusion", "status": "weak"})
-        ros.link_evidence_item_to_claim(self.agent_root, f"reference:{real_ref['id']}", {"claim_id": claim["id"]})
+        ros.link_evidence_item_to_claim(self.agent_root, f"reference:{real_ref['id']}", {"project_id": self.project["id"], "claim_id": claim["id"]})
         gate = ros.evaluate_evidence_for_claim_confirmation(self.agent_root, claim["id"])
         self.assertTrue(gate["can_confirm"])
-        confirmed = ros.confirm_claim(self.agent_root, claim["id"], {"confirmed_by": "pi"})
+        confirmed = ros.confirm_claim(self.agent_root, claim["id"], {"project_id": self.project["id"], "confirmed_by": "pi"})
         self.assertEqual(confirmed["status"], "confirmed")
         self.assertEqual(confirmed["claim"]["status"], "confirmed")
 
         weak = ros.create_claim(self.agent_root, {"project_id": self.project["id"], "claim_text": "Needs more evidence claim.", "claim_type": "hypothesis", "status": "weak"})
-        marked = ros.mark_claim_needs_more_evidence(self.agent_root, weak["id"], {"reason": "Need real reference."})
+        marked = ros.mark_claim_needs_more_evidence(self.agent_root, weak["id"], {"project_id": self.project["id"], "reason": "Need real reference."})
         self.assertEqual(marked["claim"]["status"], "needs_more_evidence")
 
     def test_p2_manual_reference_edit_and_export_templates(self) -> None:
@@ -652,6 +654,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
             self.agent_root,
             reference["id"],
             {
+                "project_id": self.project["id"],
                 "title": "Edited manual paper",
                 "authors": ["Validation User"],
                 "year": "2026",
@@ -673,9 +676,9 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
         self.assertEqual(updated["title"], "Edited manual paper")
         self.assertIn("FNP", updated["tags"])
         self.assertIn("macrophage stimulation", updated["protocol_candidates"])
-        important = ros.mark_reference_important(self.agent_root, reference["id"], {"reason": "Read first."})
+        important = ros.mark_reference_important(self.agent_root, reference["id"], {"project_id": self.project["id"], "reason": "Read first."})
         self.assertEqual(important["impact_label"], "important")
-        excluded = ros.exclude_reference(self.agent_root, reference["id"], {"reason": "Out of scope after review."})
+        excluded = ros.exclude_reference(self.agent_root, reference["id"], {"project_id": self.project["id"], "reason": "Out of scope after review."})
         self.assertEqual(excluded["reading_status"], "excluded")
 
         for template, expected in {
@@ -706,7 +709,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
                 "content": "sample_id,group,condition,dose,timepoint,assay,gene,fold_change\nS001,Control,Vehicle,0,24h,qPCR,IL6,1.0\nS002,Treatment,LPS,100 ng/mL,24h,qPCR,IL6,4.3\n",
             },
         )
-        ros.run_extraction(self.agent_root, {"file_id": file_record["id"]})
+        ros.run_extraction(self.agent_root, {"project_id": self.project["id"], "file_id": file_record["id"]})
         first = canonical_memory.query_research_context(self.agent_root, {"project_id": self.project["id"], "query": "S001 qPCR IL6", "limit": 10})
         second = canonical_memory.query_research_context(
             self.agent_root,
@@ -1003,7 +1006,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
                 "force_new": True,
             },
         )
-        result = ros.run_agent_task(self.agent_root, task["task_id"], {"trigger": "unit"})
+        result = ros.run_agent_task(self.agent_root, task["task_id"], {"project_id": self.project["id"], "trigger": "unit"})
         self.assertTrue(result["ok"])
         self.assertEqual(result["task"]["status"], "completed")
         memories = ros.list_agent_memory(self.agent_root, project_id=self.project["id"])["entries"]
@@ -1250,7 +1253,7 @@ Next step: Repeat with clarified stock preparation, lower high dose, viability c
                 "force_new": True,
             },
         )
-        result = ros.run_agent_task(self.agent_root, task["task_id"], {"message": "把刚才流程总结成 skill"})
+        result = ros.run_agent_task(self.agent_root, task["task_id"], {"project_id": self.project["id"], "message": "把刚才流程总结成 skill"})
         self.assertTrue(result["ok"])
         draft = result["result"]["skill_draft"]
         self.assertEqual(draft["status"], "draft")

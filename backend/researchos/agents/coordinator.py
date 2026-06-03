@@ -21,6 +21,13 @@ from backend.researchos.memory.memory_event import create_memory_event
 from backend.researchos.memory.working.working_memory_store import append_recent_message, compact_working_memory, set_current_task
 
 
+def _require_project_id(project_id: str | None) -> str:
+    value = str(project_id or "").strip()
+    if not value:
+        raise ValueError("project_id is required")
+    return value
+
+
 class AgentCoordinator:
     def __init__(
         self,
@@ -37,6 +44,7 @@ class AgentCoordinator:
         lightweight = lightweight_chat_response(user_query, intent)
         if lightweight:
             return lightweight
+        project_id = _require_project_id(project_id)
         if project_id:
             append_recent_message(project_id, "user", user_query, {"project_id": project_id})
         compiled_context = self.brain_agent.compile_context(user_query, project_id, intent)
@@ -101,6 +109,7 @@ class AgentCoordinator:
         lightweight = lightweight_chat_response(user_query, intent)
         if lightweight:
             return lightweight
+        project_id = _require_project_id(project_id)
         if project_id:
             append_recent_message(project_id, "user", user_query, {"project_id": project_id})
         task = self.task_store.create_task(project_id, user_query)
@@ -129,7 +138,7 @@ class AgentCoordinator:
             self.task_store.write_validation(task, validation_report)
             memory_commit = _authorization_memory_commit(authorization)
             self.task_store.write_memory_commit(task, memory_commit)
-            episode = create_episode_from_task(task.task_id)
+            episode = create_episode_from_task(task.task_id, project_id=project_id, task_dir=self.task_store.task_dir(task.task_id))
             cognitive_state = refresh_cognitive_state_after_task(project_id, task.task_id) if project_id else {}
             decision = self.brain_agent.evaluate_execution_result(result, task_spec)
             handoff = compose_handoff(task)
@@ -204,7 +213,7 @@ class AgentCoordinator:
             pending_skill=(post_task_processing.get("pending_skill") if isinstance(post_task_processing, dict) else None),
         )
         self.task_store.write_memory_commit(task, memory_commit)
-        episode = create_episode_from_task(task.task_id)
+        episode = create_episode_from_task(task.task_id, project_id=project_id, task_dir=self.task_store.task_dir(task.task_id))
         cognitive_state = refresh_cognitive_state_after_task(project_id, task.task_id) if project_id else {}
 
         decision = self.brain_agent.evaluate_execution_result(result, task_spec)

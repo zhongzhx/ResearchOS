@@ -8,6 +8,7 @@ import { bindWorkflowResultActions, renderWorkflowResult } from "../components/w
 import {
   WORKFLOW_DEFINITIONS,
   WORKFLOW_GROUPS,
+  backendIntentForWorkflow,
   buildWorkflowPlan,
   createWorkflowDraft,
   executeWorkflow,
@@ -29,6 +30,8 @@ let formValues = {};
 let activeGroup = "全部";
 let searchTerm = "";
 let renderedProjectId = null;
+let backendRegistryLoaded = false;
+let backendWorkflowStatus = new Map();
 
 const STATUS_LABELS = {
   executable: "可执行",
@@ -137,12 +140,19 @@ function resetWorkspaceForProject(projectId) {
   renderedProjectId = projectId;
 }
 
+if (typeof window !== "undefined") {
+  window.addEventListener?.("researchos:active-project-changed", (event) => resetWorkspaceForProject(event.detail?.projectId || ""));
+}
+
 function currentConversationId(projectId) {
   return ensureActiveConversation(projectId);
 }
 
 function selectedWorkflow(intent) {
-  return WORKFLOW_DEFINITIONS[intent] || null;
+  const definition = WORKFLOW_DEFINITIONS[intent] || null;
+  const backendIntent = backendIntentForWorkflow(intent);
+  const backendDefinition = backendIntent ? backendWorkflowStatus.get(backendIntent) : null;
+  return definition && backendDefinition ? { ...definition, current_status: backendDefinition.current_status || definition.current_status } : definition;
 }
 
 function statusLabel(status) {
@@ -250,7 +260,7 @@ function workflowCardMarkup(definition) {
 
 function workflowGroupsMarkup() {
   const groups = groupedWorkflowDefinitions()
-    .map(({ group, workflows }) => ({ group, workflows: workflows.filter(cardMatches) }))
+    .map(({ group, workflows }) => ({ group, workflows: workflows.map((definition) => selectedWorkflow(definition.intent)).filter(cardMatches) }))
     .filter(({ workflows }) => workflows.length);
   if (!groups.length) return `<div class="empty-state compact"><strong>没有找到匹配的工作台任务</strong><p>换一个关键词试试，例如“文献、PPT、qPCR”。</p></div>`;
   return groups
@@ -261,6 +271,15 @@ function workflowGroupsMarkup() {
       </section>`,
     )
     .join("");
+}
+
+async function refreshBackendWorkflowRegistry() {
+  if (backendRegistryLoaded) return;
+  if (typeof window === "undefined" || !window.location) return;
+  const response = await api.getWorkflowRegistry();
+  if (!response.ok) return;
+  backendWorkflowStatus = new Map((response.data?.workflows || []).map((workflow) => [workflow.intent, workflow]));
+  backendRegistryLoaded = true;
 }
 
 function paramInputType(param, value) {
@@ -432,7 +451,6 @@ async function handleWorkflowAction(root, id) {
     );
     latestResult = planResult;
     saveWorkflowHistory(projectId, workflowHistoryRecord(activeDraft, { status: activeDraft.status, result_summary: latestPlan.message }));
-    saveWorkflowArtifacts(projectId, activeDraft, planResult);
   }
   if (id === "confirm") {
     const definition = selectedWorkflow(activeDraft.intent);
@@ -452,8 +470,8 @@ async function handleWorkflowAction(root, id) {
     }
     const conversationId = currentConversationId(projectId);
     const confirmedDraft = { ...activeDraft, status: "confirmed", current_step: "已确认", next_step: "开始执行。", linked_conversation_id: conversationId, plan: latestPlan };
-    activeDraft = { ...confirmedDraft, status: "running", current_step: "正在执行", next_step: "完成后将显示结果。" };
-    saveWorkflowHistory(projectId, workflowHistoryRecord(confirmedDraft, { status: "running", result_summary: "任务已确认，正在执行。" }));
+    activeDraft = { ...confirmedDraft, status: "submitting", current_step: "正在提交", next_step: "收到后端 run_id 后将显示真实执行状态。" };
+    saveWorkflowHistory(projectId, workflowHistoryRecord(confirmedDraft, { status: "submitting", result_summary: "任务已确认，正在请求后端创建 workflow run。" }));
     renderWorkspaceView({ root });
     const rawResult = await executeWorkflow(confirmedDraft, api, { projectId, conversationId, sessionId: appState.sessionId || conversationId });
     const result = formatWorkflowResult(rawResult, { developerMode: appState.developerMode });
@@ -507,6 +525,8 @@ function bindWorkspaceEvents(root) {
 }
 
 export async function renderWorkspaceView({ root }) {
+  const shouldRefreshRegistry = !backendRegistryLoaded;
+  const registryRefresh = shouldRefreshRegistry ? refreshBackendWorkflowRegistry() : null;
   const projectId = currentProjectId();
   resetWorkspaceForProject(projectId);
   const statusModel = latestResult ? { ...activeDraft, ...latestResult, result: latestResult } : activeDraft;
@@ -532,6 +552,10 @@ export async function renderWorkspaceView({ root }) {
     },
     { once: true },
   );
+  if (registryRefresh) {
+    await registryRefresh;
+    if (backendRegistryLoaded) renderWorkspaceView({ root });
+  }
 }
 
 export async function startUserWorkflow(intent, params = {}) {

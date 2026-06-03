@@ -22,6 +22,7 @@ class BackendChatSmokeTests(unittest.TestCase):
         os.environ["LLM_PROVIDER"] = "mock"
         os.environ["TEST_LLM_SENTINEL"] = "true"
         os.environ["RESEARCHOS_WATCH_AFTER_SKILL_RUN"] = "0"
+        self.project = ros.create_project(self.agent_root, {"id": "smoke-project", "title": "Smoke Project"})
 
     def tearDown(self) -> None:
         for key, value in self.previous_env.items():
@@ -31,12 +32,12 @@ class BackendChatSmokeTests(unittest.TestCase):
                 os.environ[key] = value
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_default_project_chat_returns_natural_language_answer(self) -> None:
+    def test_selected_project_chat_returns_natural_language_answer(self) -> None:
         result = ros.agent_chat(
             self.agent_root,
             {
                 "message": "你好",
-                "project_id": "default",
+                "project_id": self.project["id"],
                 "conversation_id": "smoke_conversation",
                 "session_id": "smoke_session",
             },
@@ -48,6 +49,10 @@ class BackendChatSmokeTests(unittest.TestCase):
         self.assertNotIn("Research Task Handoff", answer)
         self.assertNotIn("TaskSpec", answer)
         self.assertNotIn("ExecutionResult", answer)
+
+    def test_chat_does_not_auto_create_default_project(self) -> None:
+        with self.assertRaisesRegex(KeyError, "project not found"):
+            ros.agent_chat(self.agent_root, {"message": "你好", "project_id": "default"})
 
     def test_chat_rejects_when_conversation_id_belongs_to_another_project(self) -> None:
         alpha = ros.create_project(self.agent_root, {"id": "alpha_project", "title": "Alpha Project"})

@@ -28,7 +28,7 @@ REQUIRED_PIPELINE_FIELDS = {
 }
 DIRECT_ROUTE_FALLBACKS = [
     ("nature_figure_generation", ["nature figure", "publication figure", "scientific figure", "manuscript figure", "publication plot", "\u79d1\u7814\u4f5c\u56fe", "\u8bba\u6587\u56fe", "\u9ad8\u6c34\u5e73\u671f\u520a\u56fe\u7247"]),
-    ("nature_citation_support", ["nature citation", "cns citation", "supporting references", "text citation", "endnote", "ris", "zotero", "\u8865\u5f15\u7528", "\u652f\u6491\u6587\u732e"]),
+    ("citation_support", ["nature citation", "cns citation", "supporting references", "text citation", "endnote", "ris", "zotero", "\u8865\u5f15\u7528", "\u652f\u6491\u6587\u732e"]),
     ("nature_data_availability", ["data availability", "fair metadata", "repository plan", "\u6570\u636e\u53ef\u7528\u6027", "\u6570\u636e\u5171\u4eab", "\u6570\u636e\u4ed3\u5e93"]),
     ("nature_reviewer_response", ["response to reviewers", "rebuttal letter", "major revision", "minor revision", "reviewer comments", "\u5ba1\u7a3f\u610f\u89c1\u56de\u590d", "\u8fd4\u4fee\u56de\u590d"]),
     ("nature_paper_to_ppt", ["paper ppt", "paper to slides", "paper presentation", "journal club", "pptx", "\u6587\u732e\u6c47\u62a5", "\u7ec4\u4f1appt", "\u8bba\u6587ppt"]),
@@ -36,7 +36,7 @@ DIRECT_ROUTE_FALLBACKS = [
     ("literature_harvest", ["\u4e0b\u8f7d", "\u6587\u732e", "\u8bba\u6587", "literature", "paper", "keyword harvest"]),
     ("browser_research_learning", ["\u6d4f\u89c8\u5668", "\u7f51\u9875", "browser"]),
     ("protocol_to_sop", ["sop", "methods \u8f6c", "protocol to"]),
-    ("data_analysis_to_narrative", ["csv", "\u7ed3\u679c\u6bb5", "data analysis"]),
+    ("scientific_data_analysis", ["csv", "\u7ed3\u679c\u6bb5", "data analysis"]),
     ("writing_review", ["\u5ba1\u7a3f", "peer review"]),
     ("failure_recovery", ["\u5931\u8d25", "failure"]),
     ("research_route_planning", ["\u89c4\u5212", "\u8def\u7ebf", "research route"]),
@@ -57,6 +57,12 @@ class ResearchPipeline:
     execution_skills: list[str] = field(default_factory=list)
     required_inputs: list[str] = field(default_factory=list)
     expected_outputs: list[str] = field(default_factory=list)
+    user_title: str = ""
+    optional_inputs: list[str] = field(default_factory=list)
+    expected_artifacts: list[str] = field(default_factory=list)
+    project_scope_required: bool = True
+    current_status: str = ""
+    honest_limitations: list[str] = field(default_factory=list)
     validation_rules: list[str] = field(default_factory=list)
     promotion_targets: list[str] = field(default_factory=list)
     auto_crystallize_candidate: bool = True
@@ -77,6 +83,12 @@ class ResearchPipeline:
             "execution_skills": self.execution_skills,
             "required_inputs": self.required_inputs,
             "expected_outputs": self.expected_outputs,
+            "user_title": self.user_title or self.pipeline_name.replace("_", " ").title(),
+            "optional_inputs": self.optional_inputs,
+            "expected_artifacts": self.expected_artifacts or self.expected_outputs,
+            "project_scope_required": self.project_scope_required,
+            "current_status": self.current_status,
+            "honest_limitations": self.honest_limitations,
             "validation_rules": self.validation_rules,
             "promotion_targets": self.promotion_targets,
             "auto_crystallize_candidate": self.auto_crystallize_candidate,
@@ -148,7 +160,7 @@ def resolve_skill_path(path_or_skill_id: str) -> str:
 def load_pipeline_registry() -> dict[str, dict[str, Any]]:
     data = _json(skill_library_root() / "pipeline_registry.json")
     pipelines: dict[str, dict[str, Any]] = {}
-    for raw in data.get("pipelines", []):
+    for raw in [*data.get("pipelines", []), *data.get("workflow_execution_pipelines", [])]:
         pipeline = ResearchPipeline(**raw).to_dict()
         pipeline["trigger_phrases"] = [_decode_json_escaped_text(trigger) for trigger in pipeline.get("trigger_phrases", [])]
         pipelines[pipeline["pipeline_name"]] = pipeline

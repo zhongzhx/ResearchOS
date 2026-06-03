@@ -6,8 +6,15 @@ from typing import Any
 from backend.researchos.memory.memory_config import ensure_memoryos_dirs, read_json, redact_payload, safe_project_id, utc_now_iso, write_json
 
 
+def _require_project_id(project_id: str | None) -> str:
+    value = str(project_id or "").strip()
+    if not value:
+        raise ValueError("project_id is required")
+    return value
+
+
 def _path(project_id: str, conversation_id: str) -> Path:
-    return ensure_memoryos_dirs()["working"] / safe_project_id(project_id) / f"{safe_project_id(conversation_id)}.json"
+    return ensure_memoryos_dirs()["working"] / safe_project_id(_require_project_id(project_id)) / f"{safe_project_id(conversation_id)}.json"
 
 
 def _default(conversation_id: str, project_id: str) -> dict[str, Any]:
@@ -44,7 +51,7 @@ def update_working_memory(conversation_id: str, project_id: str, patch: dict[str
 
 def append_recent_message(conversation_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     metadata = metadata or {}
-    project_id = str(metadata.get("project_id") or "global")
+    project_id = _require_project_id(metadata.get("project_id"))
     memory = get_working_memory(conversation_id, project_id)
     message = {
         "role": str(role),
@@ -60,18 +67,19 @@ def append_recent_message(conversation_id: str, role: str, content: str, metadat
     return memory
 
 
-def set_current_task(conversation_id: str, task_id: str, project_id: str = "global") -> dict[str, Any]:
+def set_current_task(conversation_id: str, task_id: str, project_id: str = "") -> dict[str, Any]:
     return update_working_memory(conversation_id, project_id, {"current_task_id": task_id})
 
 
-def clear_working_memory(conversation_id: str, reason: str | None = None, project_id: str = "global") -> dict[str, Any]:
+def clear_working_memory(conversation_id: str, reason: str | None = None, project_id: str = "") -> dict[str, Any]:
+    project_id = _require_project_id(project_id)
     memory = _default(conversation_id, project_id)
     memory["last_agent_action"] = f"working_memory_cleared: {reason or ''}".strip()
     write_json(_path(project_id, conversation_id), memory)
     return memory
 
 
-def compact_working_memory(conversation_id: str, max_items: int = 20, project_id: str = "global") -> dict[str, Any]:
+def compact_working_memory(conversation_id: str, max_items: int = 20, project_id: str = "") -> dict[str, Any]:
     memory = get_working_memory(conversation_id, project_id)
     memory["recent_messages"] = list(memory.get("recent_messages") or [])[-max_items:]
     memory["current_plan"] = list(memory.get("current_plan") or [])[:max_items]

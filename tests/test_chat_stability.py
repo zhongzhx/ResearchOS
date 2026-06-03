@@ -85,7 +85,7 @@ class ChatStabilityTests(unittest.TestCase):
         self.assertIn('<li>RAW264.7</li>', html)
         self.assertIn('<li>接种细胞</li>', html)
 
-    def test_missing_project_id_shows_create_project_guide_and_api_has_safe_fallback(self) -> None:
+    def test_missing_project_id_shows_create_project_guide_and_api_rejects_fallback(self) -> None:
         chat = read(CHAT_JS)
         api = read(API_JS)
 
@@ -93,7 +93,8 @@ class ChatStabilityTests(unittest.TestCase):
         self.assertIn("创建一个项目，开始保存你的研究对话和资料。", chat)
         self.assertIn("if (!activeProjectId) return false", chat)
         self.assertIn("project_id: safeProjectId", api)
-        self.assertIn('DEFAULT_PROJECT_ID = "default"', api)
+        self.assertIn("requireProjectId", api)
+        self.assertNotIn('DEFAULT_PROJECT_ID = "default"', api)
 
     def test_project_display_name_prefers_human_fields(self) -> None:
         switcher = read(PROJECT_SWITCHER_JS)

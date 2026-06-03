@@ -28,10 +28,13 @@ def build_memory_context(
     project_id: str | None = None,
     max_tokens: int = 1500,
 ) -> str:
-    if project_id and not get_current_project_view(agent_root, project_id):
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
+    if not get_current_project_view(agent_root, project_id):
         consolidate_memory(agent_root, user_id=user_id, group_id=group_id, project_id=project_id)
 
-    view = get_current_project_view(agent_root, project_id) if project_id else None
+    view = get_current_project_view(agent_root, project_id)
     memories = retrieve_memory(
         agent_root,
         user_id=user_id,

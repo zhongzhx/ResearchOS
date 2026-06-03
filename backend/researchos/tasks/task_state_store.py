@@ -49,6 +49,9 @@ class ResearchTaskStateStore:
         return self.base_dir / task_id
 
     def create_task(self, project_id: str | None, user_query: str, task_id: str | None = None) -> ResearchTask:
+        project_id = str(project_id or "").strip()
+        if not project_id:
+            raise ValueError("project_id is required")
         task = ResearchTask(task_id=task_id, project_id=project_id, user_query=user_query) if task_id else ResearchTask(project_id=project_id, user_query=user_query)
         self.task_dir(task.task_id).mkdir(parents=True, exist_ok=True)
         self._write_json(task.task_id, "task.json", task.to_dict())

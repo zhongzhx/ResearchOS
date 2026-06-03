@@ -1,7 +1,8 @@
-import { archiveProject, clearProject, createProject, purgeProject, updateProject } from "../api.js";
+import { archiveProject, clearProject, createProject, getProjectPaths, getProjectStatus, getWorkspaceState, purgeProject, updateProject } from "../api.js";
 import { appState, projectDisplayName, setActiveProjectId, setCurrentView, startNewConversation } from "../state.js";
 import { badge, escapeHtml, text } from "../components/cards.js";
 import { emptyState } from "../components/empty_state.js";
+import { jsonDetails } from "../components/json_viewer.js";
 
 function projectId(project) {
   return project.id || project.project_id || "";
@@ -52,11 +53,61 @@ async function refreshAfterProjectChange({ refreshProjects, refreshShell, render
 
 let projectActionStatus = null;
 
+function renderProjectWorkspace(projectWorkspace = {}) {
+  const paths = projectWorkspace.paths || {};
+  const kb = projectWorkspace.kb || {};
+  const rag = projectWorkspace.rag || {};
+  if (!projectWorkspace.project_id) return "";
+  return `<div class="project-context-strip">
+    <div><span>本地项目目录</span><strong>${escapeHtml(paths.root_dir || "未创建")}</strong></div>
+    <div><span>知识目录</span><strong>${escapeHtml(paths.knowledge_dir || "未创建")}</strong></div>
+    <div><span>知识库</span><strong>${kb.ready ? `可检索 · ${Number(kb.entries_count || 0)} 条` : "尚未构建"}</strong></div>
+    <div><span>RAG 范围</span><strong>${rag.default_scope === "current_project" ? "当前项目" : escapeHtml(rag.default_scope || "当前项目")}</strong></div>
+  </div>`;
+}
+
+function renderProjectStatus(projectStatus = {}, projectPaths = {}) {
+  if (!projectStatus.project_id) return "";
+  const latestRun = projectStatus.latest_workflow_run || {};
+  const latestRunLabel = latestRun.id || latestRun.skill_name || latestRun.skill_id || "暂无运行记录";
+  const developerDetails = appState.developerMode
+    ? `<div class="project-developer-details">
+        <div><span>数据库路径</span><strong>${escapeHtml(projectPaths.database_path || "未连接")}</strong></div>
+        <div><span>Debug 日志路径</span><strong>${escapeHtml(projectPaths.api_debug_log_path || projectPaths.debug_log_path || "未连接")}</strong></div>
+        ${jsonDetails("项目状态原始 JSON", { projectStatus, projectPaths })}
+      </div>`
+    : "";
+  return `<section class="project-status-card">
+    <div><span>项目名称</span><strong>${escapeHtml(projectStatus.display_name || "未命名项目")}</strong></div>
+    <div><span>项目 ID</span><strong>${escapeHtml(projectStatus.project_id)}</strong></div>
+    <div><span>项目根目录</span><strong>${escapeHtml(projectStatus.root_path || "未创建")}</strong></div>
+    <div><span>资料库状态</span><strong>${escapeHtml(projectStatus.library_status || "needs_input")}</strong></div>
+    <div><span>知识库状态</span><strong>${escapeHtml(projectStatus.kb_status || "needs_input")}</strong></div>
+    <div><span>RAG 状态</span><strong>${escapeHtml(projectStatus.rag_status || "needs_input")}</strong></div>
+    <div><span>文件数量</span><strong>${Number(projectStatus.file_count || 0)}</strong></div>
+    <div><span>生成物数量</span><strong>${Number(projectStatus.artifact_count || 0)}</strong></div>
+    <div><span>最近 workflow run</span><strong>${escapeHtml(latestRunLabel)}</strong></div>
+    <div><span>最近更新时间</span><strong>${escapeHtml(projectStatus.last_activity_at || projectStatus.updated_at || "暂无记录")}</strong></div>
+    <div><span>归档状态</span><strong>${projectStatus.is_archived ? "已归档" : "未归档"}</strong></div>
+    ${developerDetails}
+  </section>`;
+}
+
 export async function renderProjectsView({ root, refreshShell, refreshProjects, renderCurrentView }) {
   const projects = appState.cachedProjects || [];
   const active = activeProject();
   const activeId = appState.activeProjectId;
   const activeName = projectName(active);
+  const [workspaceResult, statusResult, pathsResult] = activeId
+    ? await Promise.all([
+        getWorkspaceState(activeId),
+        getProjectStatus(activeId),
+        appState.developerMode ? getProjectPaths(activeId) : Promise.resolve(null),
+      ])
+    : [null, null, null];
+  const projectWorkspace = workspaceResult?.ok ? workspaceResult.data?.project_workspace || {} : {};
+  const projectStatus = statusResult?.ok ? statusResult.data?.project_status || {} : {};
+  const projectPaths = pathsResult?.ok ? pathsResult.data?.paths || {} : {};
   root.innerHTML = `<section class="page">
     <header class="page-header">
       <div><h1 class="page-title">项目</h1><p class="page-subtitle">创建、选择和管理 AURA Research 项目。</p></div>
@@ -83,6 +134,8 @@ export async function renderProjectsView({ root, refreshShell, refreshProjects, 
                  </div>`
               : emptyState("还没有项目", "创建一个项目，开始保存你的研究对话和资料。")
           }
+          ${renderProjectWorkspace(projectWorkspace)}
+          ${renderProjectStatus(projectStatus, projectPaths)}
         </div>
         <div class="panel pad grid">
           <h2 class="item-title">项目列表</h2>
@@ -166,7 +219,7 @@ export async function renderProjectsView({ root, refreshShell, refreshProjects, 
       if (!activeId) return;
       if (!confirm(`确定彻底删除项目“${activeName}”吗？`)) return;
       if (!confirm("请再次确认：彻底删除后普通项目列表中不再显示。")) return;
-      const result = await purgeProject(activeId, { confirmation: `CONFIRM PURGE ${activeName}`, confirmed_by_user: "web_client" });
+      const result = await purgeProject(activeId, { confirmation: `CONFIRM PURGE ${activeName}`, confirmed_by_user: "web_client", confirm: true });
       projectActionStatus = result;
       await refreshAfterProjectChange({ refreshProjects, refreshShell, renderCurrentView });
     });
@@ -180,7 +233,7 @@ export async function renderProjectsView({ root, refreshShell, refreshProjects, 
       if (!targetId) return;
       if (!confirm(`确定彻底删除项目“${targetName}”吗？`)) return;
       if (!confirm("请再次确认：彻底删除后普通项目列表中不再显示。")) return;
-      const result = await purgeProject(targetId, { confirmation: `CONFIRM PURGE ${targetName}`, confirmed_by_user: "web_client" });
+      const result = await purgeProject(targetId, { confirmation: `CONFIRM PURGE ${targetName}`, confirmed_by_user: "web_client", confirm: true });
       projectActionStatus = result;
       await refreshAfterProjectChange({ refreshProjects, refreshShell, renderCurrentView });
     });

@@ -35,6 +35,13 @@ from researchos_core_skills import (
     tool_capability_skills,
 )
 from runtime_paths import core_runtime_memory_root, repo_root
+from backend.researchos.workspace.project_workspace import (
+    ProjectWorkspace,
+    archive_workspace_file,
+    canonical_project_paths,
+    ensure_project_workspace,
+    write_project_workspace_manifest,
+)
 
 
 def load_env_file(path: Path) -> None:
@@ -233,6 +240,19 @@ def now() -> str:
 
 def clean(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def require_project_id(value: Any) -> str:
+    project_id = clean(value.get("project_id")) if isinstance(value, dict) else clean(value)
+    if not project_id:
+        raise ValueError("project_id is required")
+    return project_id
+
+
+def ensure_project_record(row: dict[str, Any] | None, project_id: str, label: str) -> dict[str, Any]:
+    if not row or clean(row.get("project_id")) != clean(project_id):
+        raise KeyError(f"{label} not found")
+    return row
 
 
 def stable_id(*parts: Any, length: int = 24) -> str:
@@ -1656,6 +1676,20 @@ def ensure_schema_compat(conn: sqlite3.Connection) -> None:
         "artifacts": {
             "task_id": "TEXT",
             "skill_run_id": "TEXT",
+            "run_id": "TEXT",
+            "registry_source_type": "TEXT",
+            "display_name": "TEXT",
+            "original_name": "TEXT",
+            "mime_type": "TEXT",
+            "extension": "TEXT",
+            "relative_path": "TEXT",
+            "absolute_path": "TEXT",
+            "sha256": "TEXT",
+            "size_bytes": "INTEGER",
+            "ingest_status": "TEXT DEFAULT 'registered'",
+            "kb_status": "TEXT DEFAULT 'not_indexed'",
+            "rag_status": "TEXT DEFAULT 'not_indexed'",
+            "source_reference_id": "TEXT",
         },
         "internal_context_events": {
             "project_id": "TEXT",
@@ -1748,6 +1782,8 @@ def ensure_schema_compat(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ros_artifacts_task ON artifacts(project_id, task_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ros_artifacts_registry ON artifacts(project_id, registry_source_type, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ros_artifacts_sha256 ON artifacts(project_id, sha256)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ros_files_upload_time ON research_files(project_id, upload_time)")
     conn.commit()
 
@@ -2201,7 +2237,7 @@ def create_project(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     pdf_dir = clean(payload.get("pdf_dir"))
     kb_dir = clean(payload.get("kb_dir"))
     if not root_dir or not uploads_dir or not pdf_dir or not kb_dir:
-        dirs = default_project_dirs(agent_root, display_name)
+        dirs = default_project_dirs(agent_root, display_name, project_id)
         root_dir = root_dir or dirs["root_dir"]
         uploads_dir = uploads_dir or dirs["uploads_dir"]
         pdf_dir = pdf_dir or dirs["pdf_dir"]
@@ -2265,6 +2301,7 @@ def create_project(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     saved = row_to_dict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
     conn.close()
     project = saved or row
+    write_project_workspace_manifest(agent_root, project, {})
     canonical_memory.sync_project(agent_root, project)
     return project
 
@@ -2275,14 +2312,8 @@ def project_storage_slug(display_name: str) -> str:
     return value or "unnamed_project"
 
 
-def default_project_dirs(agent_root: Path, display_name: str) -> dict[str, str]:
-    root = agent_root / "research_os_files" / "projects" / project_storage_slug(display_name)
-    return {
-        "root_dir": str(root),
-        "uploads_dir": str(root / "uploads"),
-        "pdf_dir": str(root / "pdf"),
-        "kb_dir": str(root / "kb"),
-    }
+def default_project_dirs(agent_root: Path, display_name: str, project_id: str = "") -> dict[str, str]:
+    return canonical_project_paths(agent_root, display_name, project_id)
 
 
 def project_display_name(project: dict[str, Any] | None) -> str:
@@ -2294,7 +2325,7 @@ def normalize_project_row(agent_root: Path, project: dict[str, Any] | None) -> d
     if not project:
         return {}
     display_name = project_display_name(project)
-    dirs = default_project_dirs(agent_root, display_name)
+    dirs = default_project_dirs(agent_root, display_name, clean(project.get("project_id") or project.get("id")))
     normalized = dict(project)
     normalized["project_id"] = clean(normalized.get("project_id")) or clean(normalized.get("id"))
     normalized["project_name"] = clean(normalized.get("project_name")) or clean(normalized.get("title")) or "未命名项目"
@@ -2345,28 +2376,6 @@ def list_projects_for_ui(agent_root: Path) -> list[dict[str, Any]]:
     for project in list_projects(agent_root):
         items.append(project_public_view(project))
     return items
-
-
-def ensure_default_chat_project(agent_root: Path, project_id: str) -> None:
-    if clean(project_id) != "default":
-        return
-    conn = connect(agent_root)
-    try:
-        exists = conn.execute("SELECT 1 FROM projects WHERE id=?", ("default",)).fetchone()
-    finally:
-        conn.close()
-    if exists:
-        return
-    create_project(
-        agent_root,
-        {
-            "id": "default",
-            "project_name": "default",
-            "display_name": "默认项目 default",
-            "title": "默认项目 default",
-            "short_description": "默认 Chat 使用的稳定项目。",
-        },
-    )
 
 
 def normalize_project_match_text(value: Any) -> str:
@@ -2453,6 +2462,9 @@ def format_project_switch_ambiguous_answer(matches: list[dict[str, Any]]) -> str
 
 
 def update_project(agent_root: Path, project_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     allowed = {"title", "project_name", "display_name", "aliases_json", "short_description", "research_area", "keywords_json", "owner", "status", "root_dir", "uploads_dir", "pdf_dir", "kb_dir", "memory_scope_id", "is_active"}
     assignments: list[str] = []
     values: list[Any] = []
@@ -2474,7 +2486,25 @@ def update_project(agent_root: Path, project_id: str, patch: dict[str, Any]) -> 
         raise KeyError("project not found")
     conn.commit()
     conn.close()
-    return normalize_project_row(agent_root, row_to_dict(row) or {})
+    project = normalize_project_row(agent_root, row_to_dict(row) or {})
+    paths = ensure_project_workspace(agent_root, project)
+    project.update(
+        {
+            "root_dir": paths["root_dir"],
+            "uploads_dir": paths["uploads_dir"],
+            "pdf_dir": paths["pdf_dir"],
+            "kb_dir": paths["kb_dir"],
+        }
+    )
+    conn = connect(agent_root)
+    conn.execute(
+        "UPDATE projects SET root_dir=?, uploads_dir=?, pdf_dir=?, kb_dir=? WHERE id=?",
+        (project["root_dir"], project["uploads_dir"], project["pdf_dir"], project["kb_dir"], project_id),
+    )
+    conn.commit()
+    conn.close()
+    write_project_workspace_manifest(agent_root, project, {})
+    return project
 
 
 def archive_project(agent_root: Path, project_id: str) -> dict[str, Any]:
@@ -2535,7 +2565,7 @@ PROJECT_CLEAR_SCOPES: dict[str, list[str]] = {
     "downloaded_pdfs": ["literature_ingest_items", "paper_requests", "unmatched_pdfs"],
     "kb": ['"references"', "reference_chunks", "knowledge_base_entries", "rag_queries", "documents", "document_chunks"],
     "memory": ["agent_memory_entries", "memory_entities", "memory_consolidation_runs", "pending_memory_candidates"],
-    "tasks": ["literature_search_tasks", "agent_tasks", "skill_runs", "execution_memory", "agent_inbox_items", "agent_watch_state"],
+    "tasks": ["literature_search_tasks", "agent_tasks", "skill_runs", "execution_memory", "agent_inbox_items", "agent_watch_state", "workflows"],
     "data_context": ["data_contexts", "file_sample_links"],
 }
 PROJECT_RESEARCH_RECORD_TABLES = ["experiments", "samples", "protocols", "conclusions", "decisions"]
@@ -2555,6 +2585,28 @@ def _scope_tables(scope: str) -> list[str]:
     return PROJECT_CLEAR_SCOPES[scope]
 
 
+def _all_project_scoped_tables(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+    tables = []
+    for row in rows:
+        table = clean(row[0])
+        if table in {"projects", "project_purge_audit"}:
+            continue
+        columns = {clean(column[1]) for column in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
+        if "project_id" in columns:
+            tables.append(table)
+    return tables
+
+
+def _delete_indirect_project_rows(conn: sqlite3.Connection, project_id: str) -> None:
+    if db_table_exists(conn, "chat_messages") and db_table_exists(conn, "chat_sessions"):
+        conn.execute("DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE project_id=?)", (project_id,))
+    if db_table_exists(conn, "agent_runs") and db_table_exists(conn, "workflows"):
+        conn.execute("DELETE FROM agent_runs WHERE workflow_id IN (SELECT id FROM workflows WHERE project_id=?)", (project_id,))
+    if db_table_exists(conn, "workflow_steps") and db_table_exists(conn, "workflows"):
+        conn.execute("DELETE FROM workflow_steps WHERE workflow_id IN (SELECT id FROM workflows WHERE project_id=?)", (project_id,))
+
+
 def _table_count(conn: sqlite3.Connection, table: str, project_id: str) -> int:
     table_name = table.strip('"')
     if not db_table_exists(conn, table_name):
@@ -2570,17 +2622,42 @@ def _project_runtime_dirs(agent_root: Path, project: dict[str, Any]) -> list[str
     return dirs
 
 
+def _project_derived_cache_dirs(agent_root: Path, project_id: str) -> list[str]:
+    safe_project_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", clean(project_id)).strip() or "unscoped"
+    agent_data_dir = Path(os.environ.get("RESEARCHOS_AGENT_DATA_DIR") or data_dir(agent_root))
+    memoryos_roots = {
+        Path(agent_root) / "memoryos",
+        agent_data_dir / "memoryos",
+        Path(os.environ.get("MEMORYOS_ROOT") or os.environ.get("RESEARCHOS_MEMORYOS_DIR") or Path.cwd() / "data" / "memoryos"),
+    }
+    brain_roots = {
+        Path(agent_root) / "research_brain",
+        agent_data_dir / "research_brain",
+        Path(os.environ.get("RESEARCH_BRAIN_ROOT") or Path.cwd() / "data" / "research_brain"),
+    }
+    dirs = []
+    for root in memoryos_roots:
+        for layer in ["events", "working", "episodic", "semantic", "retrieval_audits", "health_reports", "archives", "learning", "conflicts"]:
+            dirs.append(str(root / layer / safe_project_id))
+    dirs.extend(str(root / "projects" / safe_project_id) for root in brain_roots)
+    return sorted(set(dirs))
+
+
 def _project_dirs_for_scope(agent_root: Path, project: dict[str, Any], scope: str) -> list[str]:
+    project_id = clean(project.get("id") or project.get("project_id"))
+    derived_cache_dirs = _project_derived_cache_dirs(agent_root, project_id) if project_id else []
     if scope == "uploads":
         return [clean(project.get("uploads_dir"))]
     if scope == "downloaded_pdfs":
         return [clean(project.get("pdf_dir"))]
     if scope == "kb":
         return [clean(project.get("kb_dir"))]
+    if scope == "memory":
+        return derived_cache_dirs
     if scope == "all":
-        return [clean(project.get("uploads_dir")), clean(project.get("pdf_dir")), clean(project.get("kb_dir"))]
+        return [clean(project.get("root_dir")), *derived_cache_dirs]
     if scope == "purge":
-        return [clean(project.get("root_dir")), clean(project.get("uploads_dir")), clean(project.get("pdf_dir")), clean(project.get("kb_dir")), *_project_runtime_dirs(agent_root, project)]
+        return [clean(project.get("root_dir")), clean(project.get("uploads_dir")), clean(project.get("pdf_dir")), clean(project.get("kb_dir")), *_project_runtime_dirs(agent_root, project), *derived_cache_dirs]
     return []
 
 
@@ -2656,10 +2733,44 @@ def _delete_project_table_rows(conn: sqlite3.Connection, project_id: str, tables
         if not db_table_exists(conn, table_name):
             continue
         try:
-            conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+            conn.execute(f'DELETE FROM "{table_name}" WHERE project_id=?', (project_id,))
         except Exception as exc:  # noqa: BLE001
             failed.append({"table": table_name, "error": str(exc)})
     return failed
+
+
+def _delete_agent_memory_compat_rows(agent_root: Path, project_id: str, *, purge: bool = False) -> list[dict[str, str]]:
+    if not (Path(agent_root) / "agent_memory.sqlite").exists():
+        return []
+    try:
+        from agent_memory.database import connect as connect_agent_memory
+
+        conn = connect_agent_memory(agent_root)
+        try:
+            memory_ids = [row[0] for row in conn.execute("SELECT id FROM memory_ledger WHERE project_id=?", (project_id,)).fetchall()]
+            if memory_ids:
+                placeholders = ",".join("?" for _ in memory_ids)
+                conn.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", memory_ids)
+            for table in ["memory_ledger", "memory_views", "experiments", "samples", "protocols", "data_files"]:
+                columns = {clean(column[1]) for column in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
+                if "project_id" in columns:
+                    conn.execute(f'DELETE FROM "{table}" WHERE project_id=?', (project_id,))
+            review_ids = []
+            for row in conn.execute("SELECT id, candidate_json FROM memory_review_queue").fetchall():
+                candidate = json_loads(row[1], {})
+                candidate_project_id = clean(candidate.get("project_id")) or clean((candidate.get("project") or {}).get("project_id")) or clean((candidate.get("experiment") or {}).get("project_id"))
+                if candidate_project_id == project_id:
+                    review_ids.append(row[0])
+            for review_id in review_ids:
+                conn.execute("DELETE FROM memory_review_queue WHERE id=?", (review_id,))
+            if purge:
+                conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        return [{"table": "agent_memory.sqlite", "error": str(exc)}]
+    return []
 
 
 def clear_project(agent_root: Path, project_id: str, scope: str, dry_run: bool = False, confirmation: str = "") -> dict[str, Any]:
@@ -2671,33 +2782,53 @@ def clear_project(agent_root: Path, project_id: str, scope: str, dry_run: bool =
     failed_files = _delete_project_files(plan.get("file_paths") or [])
     if failed_files:
         return {"ok": False, "executed": False, "reason": "file_delete_failed", "deletion_plan": plan, "failed_files": failed_files, "failed_tables": []}
+    failed_dirs = _delete_project_dirs(plan.get("affected_dirs") or [])
+    if failed_dirs:
+        return {"ok": False, "executed": False, "reason": "directory_delete_failed", "deletion_plan": plan, "failed_files": failed_dirs, "failed_tables": []}
+    compat_failures = _delete_agent_memory_compat_rows(agent_root, project_id) if clean(scope) in {"all", "memory"} else []
+    if compat_failures:
+        return {"ok": False, "executed": False, "reason": "table_delete_failed", "deletion_plan": plan, "failed_files": [], "failed_tables": compat_failures}
     conn = connect(agent_root)
     try:
-        failed_tables = _delete_project_table_rows(conn, project_id, _scope_tables(clean(scope) or "all"))
+        if clean(scope) == "all":
+            _delete_indirect_project_rows(conn, project_id)
+            tables = _all_project_scoped_tables(conn)
+        else:
+            tables = _scope_tables(clean(scope) or "all")
+        failed_tables = _delete_project_table_rows(conn, project_id, tables)
         if failed_tables:
             conn.rollback()
             return {"ok": False, "executed": False, "reason": "table_delete_failed", "deletion_plan": plan, "failed_files": [], "failed_tables": failed_tables}
         conn.commit()
     finally:
         conn.close()
-    return {"ok": True, "executed": True, "scope": clean(scope) or "all", "display_name": display_name, "deletion_plan": plan, "failed_files": [], "failed_tables": []}
+    status = get_project_status(agent_root, project_id)
+    return {"ok": True, "executed": True, "scope": clean(scope) or "all", "display_name": display_name, "deletion_plan": plan, "project_status": status, "failed_files": [], "failed_tables": []}
 
 
-def purge_project(agent_root: Path, project_id: str, dry_run: bool = False, confirmation: str = "", confirmed_by_user: str = "") -> dict[str, Any]:
+def purge_project(agent_root: Path, project_id: str, dry_run: bool = False, confirmation: str = "", confirmed_by_user: str = "", confirm: bool = False) -> dict[str, Any]:
     project = get_project_detail(agent_root, project_id)
     display_name = project_display_name(project)
     plan = build_project_deletion_plan(agent_root, project_id, "all", purge=True)
-    if dry_run or not _confirmation_matches("purge", display_name, confirmation):
-        return {"ok": True, "executed": False, "reason": "confirmation_required" if not dry_run else "dry_run", "deletion_plan": plan, "failed_files": [], "failed_tables": []}
+    if dry_run:
+        return {"ok": True, "executed": False, "reason": "dry_run", "deletion_plan": plan, "failed_files": [], "failed_tables": []}
+    if confirm is not True:
+        return {"ok": True, "executed": False, "reason": "confirm_true_required", "deletion_plan": plan, "failed_files": [], "failed_tables": []}
+    if not _confirmation_matches("purge", display_name, confirmation):
+        return {"ok": True, "executed": False, "reason": "confirmation_required", "deletion_plan": plan, "failed_files": [], "failed_tables": []}
     failed_files = _delete_project_files(plan.get("file_paths") or [])
     if failed_files:
         return {"ok": False, "executed": False, "reason": "file_delete_failed", "deletion_plan": plan, "failed_files": failed_files, "failed_tables": []}
     failed_dirs = _delete_project_dirs(plan.get("affected_dirs") or [clean(project.get("root_dir"))])
     if failed_dirs:
         return {"ok": False, "executed": False, "reason": "directory_delete_failed", "deletion_plan": plan, "failed_files": failed_dirs, "failed_tables": []}
+    compat_failures = _delete_agent_memory_compat_rows(agent_root, project_id, purge=True)
+    if compat_failures:
+        return {"ok": False, "executed": False, "reason": "table_delete_failed", "deletion_plan": plan, "failed_files": [], "failed_tables": compat_failures}
     conn = connect(agent_root)
     try:
-        failed_tables = _delete_project_table_rows(conn, project_id, _scope_tables("all"))
+        _delete_indirect_project_rows(conn, project_id)
+        failed_tables = _delete_project_table_rows(conn, project_id, _all_project_scoped_tables(conn))
         if failed_tables:
             conn.rollback()
             return {"ok": False, "executed": False, "reason": "table_delete_failed", "deletion_plan": plan, "failed_files": [], "failed_tables": failed_tables}
@@ -2710,7 +2841,7 @@ def purge_project(agent_root: Path, project_id: str, dry_run: bool = False, conf
             """,
             (audit_id, project_id, display_name, timestamp, clean(confirmed_by_user) or "user_confirmed", timestamp),
         )
-        conn.execute("UPDATE projects SET status='purged', is_active=0, updated_at=? WHERE id=?", (timestamp, project_id))
+        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         conn.commit()
     finally:
         conn.close()
@@ -2718,6 +2849,9 @@ def purge_project(agent_root: Path, project_id: str, dry_run: bool = False, conf
 
 
 def get_project_status(agent_root: Path, project_id: str) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     project = get_project_detail(agent_root, project_id)
     conn = connect(agent_root)
     try:
@@ -2737,6 +2871,18 @@ def get_project_status(agent_root: Path, project_id: str) -> dict[str, Any]:
             + db_count(conn, "execution_memory", "project_id=?", (project_id,))
         )
         data_contexts = db_count(conn, "data_contexts", "project_id=?", (project_id,))
+        artifact_count = db_count(conn, "artifacts", "project_id=?", (project_id,))
+        file_count = db_count(conn, "research_files", "project_id=?", (project_id,))
+        reference_count = db_count(conn, "references", "project_id=?", (project_id,))
+        kb_entry_count = db_count(conn, "knowledge_base_entries", "project_id=?", (project_id,))
+        rag_chunk_count = db_count(conn, "reference_chunks", "project_id=?", (project_id,)) + db_count(conn, "document_chunks", "project_id=?", (project_id,))
+        workflow_run_count = db_count(conn, "skill_runs", "project_id=?", (project_id,))
+        latest_workflow_run = row_to_dict(
+            conn.execute(
+                "SELECT id, skill_id, skill_name, status, created_at, updated_at FROM skill_runs WHERE project_id=? ORDER BY updated_at DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+        ) or {}
         file_paths = _project_file_paths(conn, project_id, "purge")
     finally:
         conn.close()
@@ -2752,6 +2898,22 @@ def get_project_status(agent_root: Path, project_id: str) -> dict[str, Any]:
         "task_records": task_records,
         "data_contexts": data_contexts,
     }
+    workspace = ProjectWorkspace(agent_root, project_id)
+    paths = workspace.ensure()
+    last_activity_at = max(
+        [clean(project.get("updated_at")), clean(latest_workflow_run.get("updated_at")), clean(latest_workflow_run.get("created_at"))]
+    )
+    manifest = workspace.write_manifest(
+        project,
+        {
+            "file_count": file_count,
+            "reference_count": reference_count,
+            "kb_entry_count": kb_entry_count,
+            "rag_chunk_count": rag_chunk_count,
+            "workflow_run_count": workflow_run_count,
+            "last_activity_at": last_activity_at,
+        },
+    )
     return {
         "project_id": project_id,
         "display_name": project_display_name(project),
@@ -2760,10 +2922,35 @@ def get_project_status(agent_root: Path, project_id: str) -> dict[str, Any]:
         "is_archived": clean(project.get("status")) == "archived",
         "is_active": bool(project.get("is_active")),
         "counts": counts,
+        "root_path": paths["root_path"],
+        "kb_path": paths["kb_path"],
+        "rag_path": paths["rag_path"],
+        "artifact_path": paths["artifact_path"],
+        "file_count": file_count,
+        "reference_count": reference_count,
+        "kb_entry_count": kb_entry_count,
+        "rag_chunk_count": rag_chunk_count,
+        "workflow_run_count": workflow_run_count,
+        "artifact_count": artifact_count,
+        "library_status": "ready" if file_count or reference_count else "needs_input",
+        "kb_status": "ready" if kb_entry_count else "needs_input",
+        "rag_status": "ready" if rag_chunk_count else "needs_input",
+        "latest_workflow_run": latest_workflow_run,
+        "last_activity_at": last_activity_at,
+        "manifest_path": manifest["manifest_path"],
         "storage": {"bytes": bytes_used, "mb": round(bytes_used / (1024 * 1024), 3)},
-        "paths": {"root_dir": root_dir, "uploads_dir": clean(project.get("uploads_dir")), "pdf_dir": clean(project.get("pdf_dir")), "kb_dir": clean(project.get("kb_dir"))},
+        "paths": paths,
         "updated_at": clean(project.get("updated_at")),
     }
+
+
+def get_project_paths(agent_root: Path, project_id: str) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    get_project_detail(agent_root, project_id)
+    paths = ProjectWorkspace(agent_root, project_id).ensure()
+    return {**paths, "database_path": str(research_os_db(agent_root)), "api_debug_log_path": str(Path(agent_root) / "logs" / "researchos_api.log")}
 
 
 def format_project_management_status_answer(status: dict[str, Any]) -> str:
@@ -2859,6 +3046,8 @@ def upsert_artifact_record(conn: sqlite3.Connection, artifact: dict[str, Any]) -
 
 
 def register_artifact(agent_root: Path, artifact: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(artifact)
+    require_existing_project(agent_root, project_id)
     conn = connect(agent_root)
     saved = upsert_artifact_record(conn, artifact)
     conn.commit()
@@ -3039,26 +3228,60 @@ def classify_memory_candidate(message_or_artifact: Any, context: dict[str, Any] 
 
 def _decode_research_artifact(row: dict[str, Any]) -> dict[str, Any]:
     metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else json_loads(row.get("metadata_json"), {})
-    artifact_type = clean(row.get("type") or metadata.get("artifact_type"))
+    archive_type = clean(metadata.get("artifact_type")) if metadata.get("archive_kind") else ""
+    artifact_type = clean(archive_type or row.get("type") or metadata.get("artifact_type"))
     content_json = metadata.get("content_json") if isinstance(metadata.get("content_json"), dict) else {}
     source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
+    absolute_path = clean(row.get("absolute_path") or row.get("path"))
+    display_name = clean(row.get("display_name") or row.get("title") or (Path(absolute_path).name if absolute_path else ""))
+    extension = clean(row.get("extension") or Path(display_name).suffix.lower())
+    preview_type = {
+        ".md": "markdown",
+        ".markdown": "markdown",
+        ".csv": "table",
+        ".tsv": "table",
+        ".xlsx": "table",
+        ".xls": "table",
+        ".svg": "figure",
+        ".png": "figure",
+        ".jpg": "figure",
+        ".jpeg": "figure",
+        ".ppt": "pptx",
+        ".pptx": "pptx",
+        ".json": "data",
+    }.get(extension, "file")
     return {
         "artifact_id": clean(row.get("artifact_id")),
         "project_id": clean(row.get("project_id")),
         "task_id": clean(row.get("task_id")),
+        "run_id": clean(row.get("run_id") or row.get("skill_run_id")),
         "artifact_type": artifact_type,
         "type": artifact_type,
-        "title": clean(row.get("title")),
+        "title": clean(row.get("title") or display_name),
+        "display_name": display_name,
+        "original_name": clean(row.get("original_name") or display_name),
+        "mime_type": clean(row.get("mime_type")) or "application/octet-stream",
+        "extension": extension,
+        "relative_path": clean(row.get("relative_path")),
+        "absolute_path": absolute_path,
+        "sha256": clean(row.get("sha256")),
+        "size_bytes": int(row.get("size_bytes") or 0),
         "content_markdown": clean(metadata.get("content_markdown")),
         "content_json": content_json,
         "date_range": metadata.get("date_range") if isinstance(metadata.get("date_range"), dict) else {},
-        "source_type": clean(row.get("source_object_type") or metadata.get("source_type")),
+        "source_type": clean(row.get("registry_source_type") or row.get("source_object_type") or metadata.get("source_type")),
         "source_refs": source_refs,
         "created_at": clean(row.get("created_at")),
+        "updated_at": clean(row.get("updated_at")),
         "created_by": clean(metadata.get("created_by")) or "agent",
         "status": clean(row.get("status")) or "draft",
+        "ingest_status": clean(row.get("ingest_status")) or "registered",
+        "kb_status": clean(row.get("kb_status")) or "not_indexed",
+        "rag_status": clean(row.get("rag_status")) or "not_indexed",
+        "source_reference_id": clean(row.get("source_reference_id")),
+        "preview_type": preview_type,
         "metadata": metadata,
-        "path": clean(row.get("path")),
+        "path": absolute_path,
         "source_object_id": clean(row.get("source_object_id")),
     }
 
@@ -3133,6 +3356,121 @@ def get_recent_artifacts(agent_root: Path, project_id: str, limit: int = 20) -> 
         return [_decode_research_artifact(row) for row in rows]
     finally:
         conn.close()
+
+
+def archive_project_artifact(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
+    project = get_project_detail(agent_root, project_id)
+    filename = clean(payload.get("filename") or payload.get("title"))
+    if not filename:
+        raise ValueError("filename is required")
+    if "content" not in payload:
+        raise ValueError("content is required")
+    archived = archive_workspace_file(
+        agent_root,
+        project,
+        filename=filename,
+        content=payload.get("content"),
+        artifact_kind=clean(payload.get("artifact_kind") or payload.get("artifact_type")),
+    )
+    source_type = {
+        "markdown": "generated_markdown",
+        "pptx": "generated_pptx",
+        "presentations": "generated_pptx",
+        "figures": "generated_figure",
+        "tables": "generated_table",
+        "data": "generated_data",
+    }.get(archived["artifact_kind"], "workflow_run_artifact")
+    saved = file_artifact_registry(agent_root).register_file(
+        project_id=project_id,
+        source_type=source_type,
+        file_path=archived["path"],
+        display_name=archived["filename"],
+        run_id=clean(payload.get("run_id") or payload.get("skill_run_id")),
+        status=clean(payload.get("status")) or "generated",
+        ingest_status="generated",
+        metadata={
+            **(payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}),
+            "archive_kind": archived["artifact_kind"],
+            "artifact_type": clean(payload.get("type") or payload.get("artifact_type")) or archived["artifact_kind"],
+            "filename": archived["filename"],
+        },
+        copy_into_registry=False,
+    )
+    return _decode_research_artifact(saved)
+
+
+def list_project_artifacts(agent_root: Path, project_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    return get_recent_artifacts(agent_root, project_id, limit=limit)
+
+
+def file_artifact_registry(agent_root: Path) -> Any:
+    from backend.researchos.workspace.file_artifact_registry import FileArtifactRegistry
+
+    return FileArtifactRegistry(agent_root)
+
+
+def list_registered_artifacts(agent_root: Path, project_id: str = "", source_type: str = "") -> list[dict[str, Any]]:
+    return file_artifact_registry(agent_root).list(require_project_id(project_id), source_type=clean(source_type))
+
+
+def register_file_artifact(agent_root: Path, payload: dict[str, Any], *, allow_external_source: bool = False) -> dict[str, Any]:
+    project_id = require_project_id(payload.get("project_id"))
+    source_type = clean(payload.get("source_type")) or "upload"
+    registry = file_artifact_registry(agent_root)
+    common = {
+        "project_id": project_id,
+        "source_type": source_type,
+        "display_name": clean(payload.get("display_name") or payload.get("original_name") or payload.get("filename")),
+        "run_id": clean(payload.get("run_id") or payload.get("skill_run_id")),
+        "status": clean(payload.get("status")) or "registered",
+        "ingest_status": clean(payload.get("ingest_status")) or "registered",
+        "kb_status": clean(payload.get("kb_status")) or "not_indexed",
+        "rag_status": clean(payload.get("rag_status")) or "not_indexed",
+        "source_reference_id": clean(payload.get("source_reference_id")),
+        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        "mime_type": clean(payload.get("mime_type")),
+    }
+    if payload.get("content") is not None:
+        return registry.register_content(content=payload.get("content"), **common)
+    if clean(payload.get("file_path")):
+        return registry.register_file(file_path=clean(payload.get("file_path")), allow_external_source=allow_external_source, **common)
+    raise ValueError("content or file_path is required")
+
+
+def get_registered_artifact(agent_root: Path, project_id: str, artifact_id: str) -> dict[str, Any]:
+    return file_artifact_registry(agent_root).get(require_project_id(project_id), clean(artifact_id))
+
+
+def ingest_registered_artifact(agent_root: Path, artifact_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload.get("project_id"))
+    status = clean(payload.get("ingest_status") or payload.get("status")) or "ingesting"
+    if status not in {"registered", "ingesting", "indexed", "failed"}:
+        raise ValueError("ingest_status must be registered, ingesting, indexed, or failed")
+    return file_artifact_registry(agent_root).update_ingest_status(
+        project_id,
+        clean(artifact_id),
+        status,
+        kb_status=clean(payload.get("kb_status")) or ("indexed" if status == "indexed" else None),
+        rag_status=clean(payload.get("rag_status")) or ("indexed" if status == "indexed" else None),
+    )
+
+
+def delete_registered_artifact(agent_root: Path, artifact_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return file_artifact_registry(agent_root).delete(
+        require_project_id(payload.get("project_id")),
+        clean(artifact_id),
+        physical_delete=payload.get("physical_delete") is True,
+    )
+
+
+def registered_artifact_open_info(agent_root: Path, project_id: str, artifact_id: str) -> dict[str, Any]:
+    return file_artifact_registry(agent_root).open_info(require_project_id(project_id), clean(artifact_id))
 
 
 def _decode_pending_memory_candidate(row: dict[str, Any], artifact: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -3464,6 +3802,10 @@ def artifacts_from_object_refs(agent_root: Path, project_id: str, skill_run_id: 
             ref_id = clean(ref.get("id"))
             if not ref_type or not ref_id:
                 continue
+            if ref_type == "artifact":
+                existing = conn.execute("SELECT 1 FROM artifacts WHERE project_id=? AND artifact_id=?", (project_id, ref_id)).fetchone()
+                if existing:
+                    continue
             artifact_type = {
                 "reference": "reference",
                 "reference_chunk": "chunk",
@@ -3506,6 +3848,9 @@ def _decode_agent_task(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_agent_tasks(agent_root: Path, project_id: str = "", status: str = "", task_type: str = "", limit: int = 100) -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -3531,11 +3876,19 @@ def list_agent_tasks(agent_root: Path, project_id: str = "", status: str = "", t
         conn.close()
 
 
-def get_agent_task(agent_root: Path, task_id: str) -> dict[str, Any]:
+def get_agent_task(agent_root: Path, task_id: str, project_id: str | None = None) -> dict[str, Any]:
     task_id = clean(task_id)
+    params: list[Any] = [task_id]
+    query = "SELECT * FROM agent_tasks WHERE task_id=?"
+    if project_id is not None:
+        project_id = clean(project_id)
+        if not project_id:
+            raise ValueError("project_id is required")
+        query += " AND project_id=?"
+        params.append(project_id)
     conn = connect(agent_root)
     try:
-        row = row_to_dict(conn.execute("SELECT * FROM agent_tasks WHERE task_id=?", (task_id,)).fetchone())
+        row = row_to_dict(conn.execute(query, params).fetchone())
         if not row:
             raise KeyError("task not found")
         task = _decode_agent_task(row)
@@ -3553,6 +3906,7 @@ def create_agent_task(agent_root: Path, payload: dict[str, Any]) -> dict[str, An
     task_type = clean(payload.get("task_type"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     if task_type not in research_operating_loop.TASK_TYPES:
         raise ValueError("unsupported task_type")
     status = clean(payload.get("status")) or "pending"
@@ -3678,13 +4032,23 @@ def update_agent_task(agent_root: Path, task_id: str, patch: dict[str, Any]) -> 
 
 def cancel_agent_task(agent_root: Path, task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
-    task = get_agent_task(agent_root, task_id)
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
+    task = get_agent_task(agent_root, task_id, project_id)
     if clean(task.get("task_type")) == "literature_harvest":
         refs = as_list(task.get("artifacts"))
         lit_ref = next((ref for ref in refs if isinstance(ref, dict) and clean(ref.get("type")) == "literature_search_task"), {})
         if lit_ref.get("id"):
             try:
-                cancel_literature_search_task(agent_root, clean(lit_ref["id"]), {"reason": clean(payload.get("reason")) or "cancelled from agent task"})
+                cancel_literature_search_task(
+                    agent_root,
+                    clean(lit_ref["id"]),
+                    {
+                        "project_id": clean(task.get("project_id")),
+                        "reason": clean(payload.get("reason")) or "cancelled from agent task",
+                    },
+                )
             except Exception:
                 pass
     return update_agent_task(agent_root, task_id, {"status": "cancelled", "error": clean(payload.get("reason")) or "cancelled by user"})
@@ -4148,7 +4512,7 @@ def run_pending_agent_tasks(agent_root: Path, project_id: str, payload: dict[str
     ][:max_auto_run]
     run_results: list[dict[str, Any]] = []
     for task in runnable:
-        run_results.append(run_agent_task(agent_root, clean(task.get("task_id")), {"trigger": trigger}))
+        run_results.append(run_agent_task(agent_root, clean(task.get("task_id")), {"project_id": project_id, "trigger": trigger}))
     feed_items: list[dict[str, Any]] = []
     for task in waiting[:5]:
         feed_items.append(research_operating_loop.feed_item_for_task(project_id, task, "该任务需要用户确认后再执行。"))
@@ -4396,6 +4760,7 @@ def create_memory_consolidation(agent_root: Path, project_id: str, event: dict[s
 
 
 def list_memory_consolidations(agent_root: Path, project_id: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -4529,8 +4894,10 @@ def create_skill_draft_from_project_history(agent_root: Path, project_id: str, u
 
 def run_agent_task(agent_root: Path, task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
-    task = get_agent_task(agent_root, task_id)
-    project_id = clean(task.get("project_id"))
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
+    task = get_agent_task(agent_root, task_id, project_id)
     task_type = clean(task.get("task_type"))
     if clean(task.get("status")) == "cancelled":
         raise ValueError("task is cancelled")
@@ -4710,11 +5077,17 @@ def get_project_detail(agent_root: Path, project_id: str) -> dict[str, Any]:
     return project
 
 
+def require_existing_project(agent_root: Path, project_id: str) -> dict[str, Any]:
+    project_id = require_project_id(project_id)
+    return get_project_detail(agent_root, project_id)
+
+
 def upsert_experiment(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     project_id = clean(payload.get("project_id"))
     title = clean(payload.get("title") or payload.get("experiment_name"))
     if not project_id or not title:
         raise ValueError("project_id and title are required")
+    require_existing_project(agent_root, project_id)
     experiment_id = clean(payload.get("id") or payload.get("experiment_id")) or stable_id(project_id, title, payload.get("experiment_date"), length=20)
     experiment_type = clean(payload.get("experiment_type")) or clean(payload.get("assay_type")) or "wet-lab experiment"
     conn = connect(agent_root)
@@ -4770,6 +5143,7 @@ def upsert_sample(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     sample_label = clean(payload.get("sample_code") or payload.get("sample_id") or payload.get("name"))
     if not project_id or not sample_label:
         raise ValueError("project_id and sample_code or sample_id are required")
+    require_existing_project(agent_root, project_id)
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
     conn = connect(agent_root)
     row = upsert_sample_record(
@@ -4839,14 +5213,8 @@ def upsert_sample(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
 def save_uploaded_content(agent_root: Path, project_id: str, filename: str, content: str | bytes) -> tuple[Path, bytes]:
     content_bytes = content if isinstance(content, bytes) else str(content).encode("utf-8")
-    project = {}
-    try:
-        conn = connect(agent_root)
-        project = normalize_project_row(agent_root, row_to_dict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()))
-        conn.close()
-    except Exception:
-        project = {}
-    project_dir = Path(clean(project.get("uploads_dir")) or (data_dir(agent_root) / project_storage_slug(project_display_name(project))))
+    project = get_project_detail(agent_root, project_id)
+    project_dir = Path(ensure_project_workspace(agent_root, project)["uploads_dir"])
     project_dir.mkdir(parents=True, exist_ok=True)
     normalized = normalize_filename(filename)
     path = project_dir / normalized
@@ -4861,6 +5229,7 @@ def register_file(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     project_id = clean(payload.get("project_id"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     filename = clean(payload.get("original_filename") or payload.get("filename"))
     file_path_value = clean(payload.get("file_path"))
     content = payload.get("content")
@@ -4872,9 +5241,10 @@ def register_file(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         path, raw = save_uploaded_content(agent_root, project_id, filename, str(content))
         extracted_text = str(content)
     elif file_path_value:
-        path = Path(file_path_value).expanduser().resolve()
-        raw = path.read_bytes()
-        extracted_text = text_from_path(path)
+        source_path = Path(file_path_value).expanduser().resolve()
+        raw = source_path.read_bytes()
+        extracted_text = text_from_path(source_path)
+        path, raw = save_uploaded_content(agent_root, project_id, filename, raw)
     else:
         raise ValueError("content or file_path is required")
 
@@ -5070,22 +5440,25 @@ def register_file(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             skill_run_id=clean(payload.get("skill_run_id")),
         )
     canonical_memory.sync_data_file(agent_root, file_record)
-    register_artifact(
-        agent_root,
-        {
-            "project_id": project_id,
-            "type": "pdf" if Path(filename).suffix.lower() == ".pdf" else "data_file",
-            "title": filename,
-            "path": str(path),
-            "source_object_type": "research_file",
-            "source_object_id": file_id,
-            "status": "created" if category != "paper" else "parsed",
-            "metadata": {"category": category, "context_status": context.get("context_status"), "checksum": checksum},
-            "task_id": clean(payload.get("task_id")),
-            "skill_run_id": clean(payload.get("skill_run_id")),
+    registry_source_type = clean(payload.get("source_type")) or ("literature_pdf" if category == "paper" and Path(filename).suffix.lower() == ".pdf" else "upload")
+    artifact = file_artifact_registry(agent_root).register_file(
+        project_id=project_id,
+        source_type=registry_source_type,
+        file_path=path,
+        display_name=filename,
+        run_id=clean(payload.get("skill_run_id")),
+        status="registered",
+        ingest_status="registered",
+        source_reference_id=clean(payload.get("source_reference_id")),
+        metadata={
+            "category": category,
+            "context_status": context.get("context_status"),
+            "checksum": checksum,
+            "research_file_id": file_id,
         },
+        copy_into_registry=True,
     )
-    return file_record
+    return {**file_record, "artifact_id": artifact["artifact_id"], "artifact": artifact}
 
 
 def normalize_file_registry_row(agent_root: Path, row: dict[str, Any] | None) -> dict[str, Any]:
@@ -5123,28 +5496,40 @@ def list_files(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
 
 
 def list_recent_uploaded_files(agent_root: Path, project_id: str = "", limit: int = 5) -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
     rows = conn.execute(
         """
         SELECT * FROM research_files
-        WHERE (?='' OR project_id=?) AND COALESCE(status,'active')!='deleted'
+        WHERE project_id=? AND COALESCE(status,'active')!='deleted'
         ORDER BY COALESCE(upload_time, imported_at, created_at) DESC
         LIMIT ?
         """,
-        (clean(project_id), clean(project_id), max(1, int(limit or 5))),
+        (project_id, max(1, int(limit or 5))),
     ).fetchall()
     conn.close()
     return [normalize_file_registry_row(agent_root, row) for row in rows_to_dicts(rows)]
 
 
-def read_file_record(agent_root: Path, file_id: str) -> dict[str, Any]:
+def read_file_record(agent_root: Path, file_id: str, project_id: str | None = None) -> dict[str, Any]:
+    params: list[Any] = [file_id]
+    query = "SELECT * FROM research_files WHERE id=?"
+    if project_id is not None:
+        project_id = clean(project_id)
+        if not project_id:
+            raise ValueError("project_id is required")
+        query += " AND project_id=?"
+        params.append(project_id)
     conn = connect(agent_root)
-    row = conn.execute("SELECT * FROM research_files WHERE id=?", (file_id,)).fetchone()
-    context = row_to_dict(conn.execute("SELECT * FROM data_contexts WHERE file_id=?", (file_id,)).fetchone())
-    conn.close()
+    row = conn.execute(query, params).fetchone()
     item = normalize_file_registry_row(agent_root, row_to_dict(row))
     if not item:
+        conn.close()
         raise KeyError("file not found")
+    context = row_to_dict(conn.execute("SELECT * FROM data_contexts WHERE file_id=? AND project_id=?", (file_id, item["project_id"])).fetchone())
+    conn.close()
     item["data_context"] = context
     return item
 
@@ -5981,10 +6366,11 @@ def extract_entities_from_text(conn: sqlite3.Connection, file_record: dict[str, 
 
 
 def run_extraction(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     file_id = clean(payload.get("file_id"))
     if not file_id:
         raise ValueError("file_id is required")
-    file_record = read_file_record(agent_root, file_id)
+    file_record = read_file_record(agent_root, file_id, project_id)
     conn = connect(agent_root)
     created = extract_entities_from_text(conn, file_record)
     if clean(file_record.get("experiment_id")):
@@ -6005,13 +6391,13 @@ def run_extraction(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         canonical_memory.sync_experiment(agent_root, experiment)
     for sample in samples:
         canonical_memory.sync_sample(agent_root, sample)
-    canonical_memory.sync_data_file(agent_root, read_file_record(agent_root, file_id))
-    return {"file": read_file_record(agent_root, file_id), "entities": created, "conflicts": conflicts}
+    canonical_memory.sync_data_file(agent_root, read_file_record(agent_root, file_id, project_id))
+    return {"file": read_file_record(agent_root, file_id, project_id), "entities": created, "conflicts": conflicts}
 
 
 def search_memory(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     query = clean(payload.get("query") or payload.get("q"))
-    project_id = clean(payload.get("project_id"))
+    project_id = require_project_id(payload)
     entity_type = clean(payload.get("entity_type"))
     trust_level = clean(payload.get("trust_level"))
     params: list[Any] = []
@@ -6058,6 +6444,7 @@ def search_memory(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_memory_entity(agent_root: Path, entity_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(patch)
     allowed = {"canonical_name", "aliases_json", "confidence", "trust_level", "status", "metadata_json", "version", "human_confirmation_status"}
     assignments: list[str] = []
     values: list[Any] = []
@@ -6078,10 +6465,10 @@ def update_memory_entity(agent_root: Path, entity_id: str, patch: dict[str, Any]
     if not assignments:
         raise ValueError("no supported memory fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), entity_id])
+    values.extend([now(), entity_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE memory_entities SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM memory_entities WHERE id=?", (entity_id,)).fetchone()
+    conn.execute(f"UPDATE memory_entities SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM memory_entities WHERE id=? AND project_id=?", (entity_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("memory entity not found")
@@ -6090,15 +6477,16 @@ def update_memory_entity(agent_root: Path, entity_id: str, patch: dict[str, Any]
     return row_to_dict(row) or {}
 
 
-def merge_memory_entities(agent_root: Path, target_id: str, source_ids: list[str]) -> dict[str, Any]:
+def merge_memory_entities(agent_root: Path, target_id: str, source_ids: list[str], project_id: str = "") -> dict[str, Any]:
+    project_id = require_project_id(project_id)
     conn = connect(agent_root)
-    target = row_to_dict(conn.execute("SELECT * FROM memory_entities WHERE id=?", (target_id,)).fetchone())
+    target = row_to_dict(conn.execute("SELECT * FROM memory_entities WHERE id=? AND project_id=?", (target_id, project_id)).fetchone())
     if not target:
         conn.close()
         raise KeyError("target memory entity not found")
     aliases = list(dict.fromkeys(as_list(target.get("aliases")) + [target["canonical_name"]]))
     for source_id in source_ids:
-        source = row_to_dict(conn.execute("SELECT * FROM memory_entities WHERE id=?", (source_id,)).fetchone())
+        source = row_to_dict(conn.execute("SELECT * FROM memory_entities WHERE id=? AND project_id=?", (source_id, project_id)).fetchone())
         if not source:
             continue
         aliases.extend(as_list(source.get("aliases")) + [source["canonical_name"]])
@@ -6235,6 +6623,7 @@ def detect_conflicts(agent_root: Path, project_id: str) -> list[dict[str, Any]]:
 
 
 def list_conflicts(agent_root: Path, project_id: str = "", status: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -6250,15 +6639,16 @@ def list_conflicts(agent_root: Path, project_id: str = "", status: str = "") -> 
 
 
 def resolve_conflict(agent_root: Path, conflict_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     status = clean(payload.get("status")) or "resolved"
     if status not in {"unresolved", "accepted", "dismissed", "resolved"}:
         raise ValueError("unsupported conflict status")
     conn = connect(agent_root)
     conn.execute(
-        "UPDATE conflict_records SET status=?, resolved_by=?, resolved_at=?, updated_at=? WHERE id=?",
-        (status, clean(payload.get("resolved_by")) or "local_user", now(), now(), conflict_id),
+        "UPDATE conflict_records SET status=?, resolved_by=?, resolved_at=?, updated_at=? WHERE id=? AND project_id=?",
+        (status, clean(payload.get("resolved_by")) or "local_user", now(), now(), conflict_id, project_id),
     )
-    row = conn.execute("SELECT * FROM conflict_records WHERE id=?", (conflict_id,)).fetchone()
+    row = conn.execute("SELECT * FROM conflict_records WHERE id=? AND project_id=?", (conflict_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("conflict not found")
@@ -6483,7 +6873,8 @@ def parse_protocol_text(agent_root: Path, payload: dict[str, Any]) -> dict[str, 
     text = clean(payload.get("text") or payload.get("paper_text") or payload.get("methods_text"))
     if not text:
         raise ValueError("text is required")
-    project_id = clean(payload.get("project_id"))
+    project_id = require_project_id(payload)
+    require_existing_project(agent_root, project_id)
     source_file_id = clean(payload.get("created_from_file_id") or payload.get("source_file_id"))
     lower = text.lower()
     protocol_type = clean(payload.get("protocol_type"))
@@ -6686,6 +7077,7 @@ def store_protocol(agent_root: Path, protocol_payload: dict[str, Any]) -> dict[s
     project_id = clean(protocol.get("project_id"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     protocol_id = clean(protocol.get("id")) or stable_id(project_id, protocol.get("title"), now(), length=20)
     timestamp = now()
     conn = connect(agent_root)
@@ -6845,11 +7237,12 @@ def store_protocol(agent_root: Path, protocol_payload: dict[str, Any]) -> dict[s
 
 
 def list_protocols(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     conn = connect(agent_root)
     protocols = rows_to_dicts(
         conn.execute(
-            "SELECT * FROM protocols WHERE (?='' OR project_id=?) ORDER BY updated_at DESC",
-            (project_id, project_id),
+            "SELECT * FROM protocols WHERE project_id=? ORDER BY updated_at DESC",
+            (project_id,),
         ).fetchall()
     )
     for protocol in protocols:
@@ -6860,9 +7253,15 @@ def list_protocols(agent_root: Path, project_id: str = "") -> list[dict[str, Any
     return protocols
 
 
-def get_protocol(agent_root: Path, protocol_id: str) -> dict[str, Any]:
+def get_protocol(agent_root: Path, protocol_id: str, project_id: str | None = None) -> dict[str, Any]:
+    params: list[Any] = [protocol_id]
+    query = "SELECT * FROM protocols WHERE id=?"
+    if project_id is not None:
+        project_id = require_project_id(project_id)
+        query += " AND project_id=?"
+        params.append(project_id)
     conn = connect(agent_root)
-    protocol = row_to_dict(conn.execute("SELECT * FROM protocols WHERE id=?", (protocol_id,)).fetchone())
+    protocol = row_to_dict(conn.execute(query, params).fetchone())
     if not protocol:
         conn.close()
         raise KeyError("protocol not found")
@@ -6937,12 +7336,13 @@ def generate_naming_convention(project_title: str, protocol: dict[str, Any], dat
 
 
 def generate_execution_package(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     protocol_id = clean(payload.get("protocol_id"))
     skill_run_id = clean(payload.get("skill_run_id"))
     if not protocol_id:
         raise ValueError("protocol_id is required")
-    protocol = get_protocol(agent_root, protocol_id)
-    project = get_project_detail(agent_root, protocol["project_id"])
+    protocol = get_protocol(agent_root, protocol_id, project_id)
+    project = get_project_detail(agent_root, project_id)
     sample_plan = []
     counter = 1
     for plan in protocol.get("sample_plan") or build_default_sample_plan(protocol.get("protocol_type", "")):
@@ -7306,6 +7706,7 @@ def create_workflow(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]
     template_key = clean(payload.get("template_key") or payload.get("template"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     if template_key not in WORKFLOW_TEMPLATES:
         raise ValueError("unsupported workflow template")
     template = WORKFLOW_TEMPLATES[template_key]
@@ -7417,8 +7818,16 @@ def skill_id_for_agent(agent_type: str) -> str:
     return stable_id("builtin", skill_name, "0.1", length=20)
 
 
-def get_workflow(conn: sqlite3.Connection, workflow_id: str) -> dict[str, Any]:
-    workflow = row_to_dict(conn.execute("SELECT * FROM workflows WHERE id=?", (workflow_id,)).fetchone())
+def get_workflow(conn: sqlite3.Connection, workflow_id: str, project_id: str | None = None) -> dict[str, Any]:
+    params: list[Any] = [workflow_id]
+    query = "SELECT * FROM workflows WHERE id=?"
+    if project_id is not None:
+        project_id = clean(project_id)
+        if not project_id:
+            raise ValueError("project_id is required")
+        query += " AND project_id=?"
+        params.append(project_id)
+    workflow = row_to_dict(conn.execute(query, params).fetchone())
     if not workflow:
         raise KeyError("workflow not found")
     workflow["steps"] = rows_to_dicts(
@@ -7428,6 +7837,10 @@ def get_workflow(conn: sqlite3.Connection, workflow_id: str) -> dict[str, Any]:
 
 
 def list_workflows(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     conn = connect(agent_root)
     rows = rows_to_dicts(
         conn.execute(
@@ -7444,6 +7857,9 @@ def list_workflows(agent_root: Path, project_id: str = "") -> list[dict[str, Any
 
 
 def workflow_board(agent_root: Path, project_id: str = "") -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
     rows = rows_to_dicts(
         conn.execute(
@@ -7537,9 +7953,12 @@ def run_agent_step(conn: sqlite3.Connection, workflow: dict[str, Any], step: dic
     return {"summary": summary, "result": result, "agent_run_id": run_id}
 
 
-def run_workflow(agent_root: Path, workflow_id: str, resume_after_approval: bool = False) -> dict[str, Any]:
+def run_workflow(agent_root: Path, workflow_id: str, resume_after_approval: bool = False, project_id: str = "") -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    workflow = get_workflow(conn, workflow_id)
+    workflow = get_workflow(conn, workflow_id, project_id)
     conn.execute("UPDATE workflows SET status='active', updated_at=? WHERE id=?", (now(), workflow_id))
     completed = []
     waiting = None
@@ -7602,8 +8021,19 @@ def run_workflow(agent_root: Path, workflow_id: str, resume_after_approval: bool
 
 
 def approve_workflow_step(agent_root: Path, step_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    row = conn.execute("SELECT * FROM workflow_steps WHERE id=?", (step_id,)).fetchone()
+    row = conn.execute(
+        """
+        SELECT ws.*
+        FROM workflow_steps ws
+        JOIN workflows w ON w.id=ws.workflow_id
+        WHERE ws.id=? AND w.project_id=?
+        """,
+        (step_id, project_id),
+    ).fetchone()
     if not row:
         conn.close()
         raise KeyError("workflow step not found")
@@ -7620,7 +8050,7 @@ def approve_workflow_step(agent_root: Path, step_id: str, payload: dict[str, Any
     conn.commit()
     workflow_id = row["workflow_id"]
     conn.close()
-    return run_workflow(agent_root, workflow_id, resume_after_approval=True)
+    return run_workflow(agent_root, workflow_id, resume_after_approval=True, project_id=project_id)
 
 
 def project_gap_payload(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:
@@ -7738,7 +8168,7 @@ def generate_report(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]
         task_id=clean(payload.get("task_id")),
     )
     if payload.get("generate_claims", True):
-        report["generated_claims"] = generate_claims_from_report(agent_root, report_id)["claims"]
+        report["generated_claims"] = generate_claims_from_report(agent_root, report_id, project_id)["claims"]
     return report
 
 
@@ -7806,6 +8236,7 @@ def conflict_report_markdown(project: dict[str, Any], conflicts: list[dict[str, 
 
 
 def list_reports(agent_root: Path, project_id: str = "", report_type: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -7941,6 +8372,7 @@ def create_claim(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def upsert_conclusion(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    require_existing_project(agent_root, require_project_id(payload))
     saved = canonical_memory.upsert_conclusion(agent_root, payload)
     register_research_asset_artifact(
         agent_root,
@@ -7964,6 +8396,7 @@ def upsert_conclusion(agent_root: Path, payload: dict[str, Any]) -> dict[str, An
 
 
 def upsert_decision(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    require_existing_project(agent_root, require_project_id(payload))
     saved = canonical_memory.upsert_decision(agent_root, payload)
     register_research_asset_artifact(
         agent_root,
@@ -7985,8 +8418,9 @@ def upsert_decision(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]
 
 
 def add_claim_evidence(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     conn = connect(agent_root)
-    claim = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=?", (claim_id,)).fetchone())
+    claim = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=? AND project_id=?", (claim_id, project_id)).fetchone())
     if not claim:
         conn.close()
         raise KeyError("claim not found")
@@ -8051,12 +8485,13 @@ def add_claim_evidence(agent_root: Path, claim_id: str, payload: dict[str, Any])
     conn.commit()
     saved = row_to_dict(conn.execute("SELECT * FROM claim_evidence WHERE id=?", (evidence_row["id"],)).fetchone()) or {}
     conn.close()
-    claim_detail = get_claim_with_evidence(agent_root, claim_id)
+    claim_detail = get_claim_with_evidence(agent_root, claim_id, project_id)
     canonical_memory.sync_claim_to_conclusion(agent_root, claim_detail, claim_detail.get("evidence") or [])
     return saved
 
 
 def list_claims(agent_root: Path, project_id: str = "", status: str = "", claim_type: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -8086,9 +8521,15 @@ def list_claims(agent_root: Path, project_id: str = "", status: str = "", claim_
     return rows
 
 
-def get_claim_with_evidence(agent_root: Path, claim_id: str) -> dict[str, Any]:
+def get_claim_with_evidence(agent_root: Path, claim_id: str, project_id: str | None = None) -> dict[str, Any]:
+    params: list[Any] = [claim_id]
+    query = "SELECT * FROM claims WHERE id=?"
+    if project_id is not None:
+        project_id = require_project_id(project_id)
+        query += " AND project_id=?"
+        params.append(project_id)
     conn = connect(agent_root)
-    claim = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=?", (claim_id,)).fetchone())
+    claim = row_to_dict(conn.execute(query, params).fetchone())
     if not claim:
         conn.close()
         raise KeyError("claim not found")
@@ -8228,6 +8669,8 @@ def list_claim_review_queue(agent_root: Path, project_id: str, status: str = "",
 
 
 def confirm_claim(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
+    get_claim_with_evidence(agent_root, claim_id, project_id)
     gate = evaluate_evidence_for_claim_confirmation(agent_root, claim_id)
     if not gate["can_confirm"]:
         claim = get_claim_with_evidence(agent_root, claim_id)
@@ -8236,10 +8679,10 @@ def confirm_claim(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> d
     timestamp = now()
     conn = connect(agent_root)
     conn.execute(
-        "UPDATE claims SET status='confirmed', confirmed_by=?, confirmed_at=?, updated_at=? WHERE id=?",
-        (confirmed_by, timestamp, timestamp, claim_id),
+        "UPDATE claims SET status='confirmed', confirmed_by=?, confirmed_at=?, updated_at=? WHERE id=? AND project_id=?",
+        (confirmed_by, timestamp, timestamp, claim_id, project_id),
     )
-    row = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=?", (claim_id,)).fetchone())
+    row = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=? AND project_id=?", (claim_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("claim not found")
@@ -8250,9 +8693,10 @@ def confirm_claim(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> d
 
 
 def reject_claim(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     conn = connect(agent_root)
-    conn.execute("UPDATE claims SET status='rejected', updated_at=? WHERE id=?", (now(), claim_id))
-    row = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=?", (claim_id,)).fetchone())
+    conn.execute("UPDATE claims SET status='rejected', updated_at=? WHERE id=? AND project_id=?", (now(), claim_id, project_id))
+    row = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=? AND project_id=?", (claim_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("claim not found")
@@ -8263,10 +8707,11 @@ def reject_claim(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> di
 
 
 def mark_claim_needs_more_evidence(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     reason = clean(payload.get("reason") or payload.get("unsupported_reason"))
     conn = connect(agent_root)
-    conn.execute("UPDATE claims SET status='needs_more_evidence', updated_at=? WHERE id=?", (now(), claim_id))
-    row = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=?", (claim_id,)).fetchone())
+    conn.execute("UPDATE claims SET status='needs_more_evidence', updated_at=? WHERE id=? AND project_id=?", (now(), claim_id, project_id))
+    row = row_to_dict(conn.execute("SELECT * FROM claims WHERE id=? AND project_id=?", (claim_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("claim not found")
@@ -8278,6 +8723,8 @@ def mark_claim_needs_more_evidence(agent_root: Path, claim_id: str, payload: dic
 
 
 def link_claim_evidence_from_payload(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
+    get_claim_with_evidence(agent_root, claim_id, project_id)
     evidence_id = clean(payload.get("evidence_review_id") or payload.get("evidence_key") or payload.get("evidence_id"))
     evidence_type = clean(payload.get("evidence_type") or payload.get("type"))
     raw_id = clean(payload.get("raw_id") or payload.get("id"))
@@ -8289,6 +8736,8 @@ def link_claim_evidence_from_payload(agent_root: Path, claim_id: str, payload: d
 
 
 def unlink_claim_evidence(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
+    get_claim_with_evidence(agent_root, claim_id, project_id)
     link_id = clean(payload.get("claim_evidence_id") or payload.get("evidence_link_id") or payload.get("id"))
     evidence_type = clean(payload.get("evidence_type"))
     evidence_id = clean(payload.get("evidence_id"))
@@ -8306,7 +8755,8 @@ def unlink_claim_evidence(agent_root: Path, claim_id: str, payload: dict[str, An
 
 
 def supersede_claim(agent_root: Path, claim_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    old_claim = get_claim_with_evidence(agent_root, claim_id)
+    project_id = require_project_id(payload)
+    old_claim = get_claim_with_evidence(agent_root, claim_id, project_id)
     new_claim = create_claim(
         agent_root,
         {
@@ -8370,9 +8820,10 @@ def markdown_claim_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
     return candidates[:30]
 
 
-def generate_claims_from_report(agent_root: Path, report_id: str) -> dict[str, Any]:
+def generate_claims_from_report(agent_root: Path, report_id: str, project_id: str = "") -> dict[str, Any]:
+    project_id = require_project_id(project_id)
     conn = connect(agent_root)
-    report = row_to_dict(conn.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone())
+    report = row_to_dict(conn.execute("SELECT * FROM reports WHERE id=? AND project_id=?", (report_id, project_id)).fetchone())
     if not report:
         conn.close()
         raise KeyError("report not found")
@@ -8398,6 +8849,7 @@ def generate_claims_from_report(agent_root: Path, report_id: str) -> dict[str, A
             agent_root,
             claim["id"],
             {
+                "project_id": report["project_id"],
                 "evidence_type": "report",
                 "evidence_id": report_id,
                 "source_snippet": candidate["claim_text"],
@@ -8406,9 +8858,9 @@ def generate_claims_from_report(agent_root: Path, report_id: str) -> dict[str, A
             },
         )
         if skill_run_id:
-            add_claim_evidence(agent_root, claim["id"], {"evidence_type": "skill_run", "evidence_id": skill_run_id, "confidence": candidate["confidence"]})
+            add_claim_evidence(agent_root, claim["id"], {"project_id": report["project_id"], "evidence_type": "skill_run", "evidence_id": skill_run_id, "confidence": candidate["confidence"]})
         for file_id in evidence_file_ids[:10]:
-            add_claim_evidence(agent_root, claim["id"], {"evidence_type": "source_file", "evidence_id": str(file_id), "source_file_id": str(file_id), "confidence": 0.5})
+            add_claim_evidence(agent_root, claim["id"], {"project_id": report["project_id"], "evidence_type": "source_file", "evidence_id": str(file_id), "source_file_id": str(file_id), "confidence": 0.5})
         created.append(claim)
     return {"report_id": report_id, "claims": created}
 
@@ -8449,7 +8901,7 @@ def generate_claims_from_memory_entities(agent_root: Path, payload: dict[str, An
                 "skill_run_id": clean(payload.get("skill_run_id")),
             },
         )
-        add_claim_evidence(agent_root, claim["id"], {"evidence_type": "memory_entity", "evidence_id": entity["id"], "confidence": confidence})
+        add_claim_evidence(agent_root, claim["id"], {"project_id": project_id, "evidence_type": "memory_entity", "evidence_id": entity["id"], "confidence": confidence})
         search_result = search_memory(agent_root, {"project_id": project_id, "query": entity["canonical_name"], "limit": 1})
         for item in search_result.get("memory", []):
             if item["id"] != entity["id"]:
@@ -8459,6 +8911,7 @@ def generate_claims_from_memory_entities(agent_root: Path, payload: dict[str, An
                     agent_root,
                     claim["id"],
                     {
+                        "project_id": project_id,
                         "evidence_type": "provenance_record",
                         "evidence_id": prov["id"],
                         "provenance_record_id": prov["id"],
@@ -8539,6 +8992,7 @@ def import_reference(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any
     title = clean(payload.get("title"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     if not title:
         raise ValueError("title is required")
     authors = as_list(payload.get("authors"))
@@ -8969,6 +9423,10 @@ def list_references(agent_root: Path, project_id: str = "", search: str = "", li
 
 
 def update_reference(agent_root: Path, reference_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     allowed = {
         "title",
         "year",
@@ -9011,10 +9469,10 @@ def update_reference(agent_root: Path, reference_id: str, payload: dict[str, Any
     if not assignments:
         raise ValueError("no supported reference fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), reference_id])
+    values.extend([now(), reference_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f'UPDATE "references" SET {", ".join(assignments)} WHERE id=?', values)
-    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=?', (reference_id,)).fetchone())
+    conn.execute(f'UPDATE "references" SET {", ".join(assignments)} WHERE id=? AND project_id=?', values)
+    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=? AND project_id=?', (reference_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("reference not found")
@@ -9023,9 +9481,12 @@ def update_reference(agent_root: Path, reference_id: str, payload: dict[str, Any
     return row
 
 
-def add_reference_tag(agent_root: Path, reference_id: str, tag: str) -> dict[str, Any]:
+def add_reference_tag(agent_root: Path, reference_id: str, tag: str, project_id: str = "") -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=?', (reference_id,)).fetchone())
+    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=? AND project_id=?', (reference_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("reference not found")
@@ -9040,9 +9501,12 @@ def add_reference_tag(agent_root: Path, reference_id: str, tag: str) -> dict[str
     return saved
 
 
-def add_reference_note(agent_root: Path, reference_id: str, note: str) -> dict[str, Any]:
+def add_reference_note(agent_root: Path, reference_id: str, note: str, project_id: str = "") -> dict[str, Any]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=?', (reference_id,)).fetchone())
+    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=? AND project_id=?', (reference_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("reference not found")
@@ -9061,6 +9525,7 @@ def mark_reference_important(agent_root: Path, reference_id: str, payload: dict[
         agent_root,
         reference_id,
         {
+            "project_id": clean(payload.get("project_id")),
             "impact_label": clean(payload.get("impact_label")) or "important",
             "reading_status": clean(payload.get("reading_status")) or "priority",
             "reason_for_inclusion": clean(payload.get("reason_for_inclusion") or payload.get("reason")) or "Marked important by user.",
@@ -9073,6 +9538,7 @@ def exclude_reference(agent_root: Path, reference_id: str, payload: dict[str, An
         agent_root,
         reference_id,
         {
+            "project_id": clean(payload.get("project_id")),
             "reading_status": "excluded",
             "reason_for_exclusion": clean(payload.get("reason_for_exclusion") or payload.get("reason")) or "Excluded by user.",
         },
@@ -9080,8 +9546,11 @@ def exclude_reference(agent_root: Path, reference_id: str, payload: dict[str, An
 
 
 def link_reference_to_object(agent_root: Path, reference_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     conn = connect(agent_root)
-    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=?', (reference_id,)).fetchone())
+    row = row_to_dict(conn.execute('SELECT * FROM "references" WHERE id=? AND project_id=?', (reference_id, project_id)).fetchone())
     conn.close()
     if not row:
         raise KeyError("reference not found")
@@ -9106,11 +9575,11 @@ def link_reference_to_object(agent_root: Path, reference_id: str, payload: dict[
 
 
 def list_reference_chunks(agent_root: Path, project_id: str = "", reference_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
-    clauses = ["1=1"]
-    params: list[Any] = []
-    if project_id:
-        clauses.append("project_id=?")
-        params.append(project_id)
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    clauses = ["project_id=?"]
+    params: list[Any] = [project_id]
     if reference_id:
         clauses.append("reference_id=?")
         params.append(reference_id)
@@ -9125,6 +9594,7 @@ def create_literature_search_task(agent_root: Path, payload: dict[str, Any]) -> 
     project_id = clean(payload.get("project_id"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     keywords = [str(item) for item in as_list(payload.get("keywords") or payload.get("query")) if clean(item)]
     query = clean(payload.get("query")) or ", ".join(keywords)
     if not query:
@@ -9200,11 +9670,12 @@ def create_literature_search_task(agent_root: Path, payload: dict[str, Any]) -> 
 
 
 def list_literature_search_tasks(agent_root: Path, project_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
-    clauses = ["1=1"]
-    params: list[Any] = []
-    if project_id:
-        clauses.append("project_id=?")
-        params.append(project_id)
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
+    clauses = ["project_id=?"]
+    params: list[Any] = [project_id]
     params.append(int(limit or 50))
     conn = connect(agent_root)
     rows = rows_to_dicts(conn.execute(f"SELECT * FROM literature_search_tasks WHERE {' AND '.join(clauses)} ORDER BY updated_at DESC LIMIT ?", params).fetchall())
@@ -9534,6 +10005,7 @@ def upsert_literature_ingest_item(agent_root: Path, item: dict[str, Any]) -> dic
 
 
 def list_literature_ingest_items(agent_root: Path, task_id: str = "", project_id: str = "", limit: int = 5000) -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if task_id:
@@ -9799,6 +10271,7 @@ def _record_unmatched_pdf(agent_root: Path, project_id: str, task_id: str, pdf_p
 
 
 def list_unmatched_pdfs(agent_root: Path, project_id: str = "", status: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -10133,7 +10606,7 @@ def incremental_ingest_literature_downloads(
     candidate_by_id = _latest_rows_by_key(candidate_rows, "record_id")
     log_dir = _keyword_harvest_work_path(run_root, "download_logs")
     log_rows = _read_csv_rows(log_dir / "keyword_research_download_log.csv")
-    existing = {clean(item.get("record_id")): item for item in list_literature_ingest_items(agent_root, task_id=task_id)}
+    existing = {clean(item.get("record_id")): item for item in list_literature_ingest_items(agent_root, task_id=task_id, project_id=project_id)}
     processed = 0
     for log_row in log_rows:
         if processed >= max_new:
@@ -10199,13 +10672,21 @@ def incremental_ingest_literature_downloads(
             log_row=log_row,
         )
         processed += 1
-    items = list_literature_ingest_items(agent_root, task_id=task_id)
+    items = list_literature_ingest_items(agent_root, task_id=task_id, project_id=project_id)
     return {"processed_new": processed, "items": items, "summary": literature_ingest_summary(items, candidate_count=len(candidate_rows))}
 
 
-def collect_keyword_harvest_progress(agent_root: Path, task_id: str) -> dict[str, Any]:
+def collect_keyword_harvest_progress(agent_root: Path, task_id: str, project_id: str | None = None) -> dict[str, Any]:
+    params: list[Any] = [task_id]
+    query = "SELECT * FROM literature_search_tasks WHERE id=?"
+    if project_id is not None:
+        project_id = clean(project_id)
+        if not project_id:
+            raise ValueError("project_id is required")
+        query += " AND project_id=?"
+        params.append(project_id)
     conn = connect(agent_root)
-    task = row_to_dict(conn.execute("SELECT * FROM literature_search_tasks WHERE id=?", (task_id,)).fetchone())
+    task = row_to_dict(conn.execute(query, params).fetchone())
     conn.close()
     if not task:
         raise KeyError("literature search task not found")
@@ -10287,7 +10768,7 @@ def collect_keyword_harvest_progress(agent_root: Path, task_id: str) -> dict[str
     final_pdf_count = len([path for path in final_pdf_dir.glob("*.pdf") if path.is_file()]) if final_pdf_dir.exists() else 0
     article_analysis_path = run_root / "article_abstracts" / "article_abstracts.csv"
     article_analysis_count = max(len(_read_csv_rows(article_analysis_path)), 0) if article_analysis_path.exists() else 0
-    ingest_items = list_literature_ingest_items(agent_root, task_id=task_id, limit=5000)
+    ingest_items = list_literature_ingest_items(agent_root, task_id=task_id, project_id=clean(task.get("project_id")), limit=5000)
     ingest_summary = literature_ingest_summary(ingest_items, candidate_count=candidate_count)
     request_counts = paper_request_counters(agent_root, project_id=clean(task.get("project_id")), task_id=task_id)
     ingest_by_record = {clean(item.get("record_id")): item for item in ingest_items}
@@ -10524,7 +11005,7 @@ def _run_keyword_harvest_background(
             monitor=monitor_incremental_ingest,
         )
         monitor_incremental_ingest(max_new=1000000)
-        ingest_items = list_literature_ingest_items(agent_root, task_id=task_id, limit=100000)
+        ingest_items = list_literature_ingest_items(agent_root, task_id=task_id, project_id=project_id, limit=100000)
         reference_ids = [clean(item.get("reference_id")) for item in ingest_items if clean(item.get("reference_id")) and clean(item.get("ingest_status")) == "indexed"]
         imported = {"references": _reference_rows_by_ids(agent_root, reference_ids)}
         article_analysis = analyze_references_with_article_keyword_skill(
@@ -10685,8 +11166,8 @@ def start_keyword_harvest_task(agent_root: Path, payload: dict[str, Any]) -> dic
     }
 
 
-def get_literature_search_task_detail(agent_root: Path, task_id: str) -> dict[str, Any]:
-    return collect_keyword_harvest_progress(agent_root, task_id)
+def get_literature_search_task_detail(agent_root: Path, task_id: str, project_id: str | None = None) -> dict[str, Any]:
+    return collect_keyword_harvest_progress(agent_root, task_id, project_id)
 
 
 def terminate_keyword_harvest_processes_for_run(run_root: Path) -> None:
@@ -10709,7 +11190,10 @@ def terminate_keyword_harvest_processes_for_run(run_root: Path) -> None:
 
 def cancel_literature_search_task(agent_root: Path, task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
-    detail = collect_keyword_harvest_progress(agent_root, task_id)
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
+    detail = collect_keyword_harvest_progress(agent_root, task_id, project_id)
     task = detail["task"]
     progress = detail["progress"]
     run_root_value = clean(progress.get("run_root"))
@@ -10737,13 +11221,18 @@ def cancel_literature_search_task(agent_root: Path, task_id: str, payload: dict[
             update_skill_run(agent_root, skill_run_id, status="failed", logs=[reason])
         except Exception:
             pass
-    return get_literature_search_task_detail(agent_root, task_id) | {"cancelled": True, "task": saved}
+    return get_literature_search_task_detail(agent_root, task_id, project_id) | {"cancelled": True, "task": saved}
 
 
-def build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+def _build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     project_id = clean(payload.get("project_id"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
+    registry = file_artifact_registry(agent_root)
+    input_artifact_ids = [clean(item) for item in as_list(payload.get("artifact_ids") or payload.get("artifact_id")) if clean(item)]
+    for artifact_id in input_artifact_ids:
+        registry.update_ingest_status(project_id, artifact_id, "ingesting")
     reference_ids = {clean(item) for item in as_list(payload.get("reference_ids")) if clean(item)}
     article_analysis: dict[str, Any] = {"analyzed_count": 0, "article_analyses": [], "output_refs": []}
     if payload.get("include_article_analysis", True):
@@ -10808,6 +11297,14 @@ def build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict
                 "metadata": {"source": "knowledge_base_build"},
             },
         )
+        conn.execute(
+            """
+            UPDATE artifacts
+            SET status='indexed', ingest_status='indexed', kb_status='indexed', rag_status='indexed', updated_at=?
+            WHERE project_id=? AND source_reference_id=? AND COALESCE(status,'')!='deleted'
+            """,
+            (timestamp, project_id, chunk["reference_id"]),
+        )
         upsert_artifact_record(
             conn,
             {
@@ -10840,6 +11337,8 @@ def build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict
     conn.commit()
     entries = rows_to_dicts(conn.execute("SELECT * FROM knowledge_base_entries WHERE project_id=? ORDER BY updated_at DESC LIMIT 100", (project_id,)).fetchall())
     conn.close()
+    for artifact_id in input_artifact_ids:
+        registry.update_ingest_status(project_id, artifact_id, "indexed", kb_status="indexed", rag_status="indexed")
     result = {
         "project_id": project_id,
         "created_count": len(created),
@@ -10870,6 +11369,22 @@ def build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict
     return result
 
 
+def build_project_research_kb(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    input_artifact_ids = [clean(item) for item in as_list(payload.get("artifact_ids") or payload.get("artifact_id")) if clean(item)]
+    try:
+        return _build_project_research_kb(agent_root, payload)
+    except Exception:
+        project_id = clean(payload.get("project_id"))
+        if project_id:
+            registry = file_artifact_registry(agent_root)
+            for artifact_id in input_artifact_ids:
+                try:
+                    registry.update_ingest_status(project_id, artifact_id, "failed")
+                except Exception:
+                    pass
+        raise
+
+
 def list_knowledge_base_entries(agent_root: Path, project_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
     project_id = clean(project_id)
     if not project_id:
@@ -10888,6 +11403,7 @@ def query_research_rag(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
     question = clean(payload.get("question") or payload.get("query"))
     if not project_id:
         raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     if not question:
         raise ValueError("question is required")
     limit = int(payload.get("limit") or 5)
@@ -11008,6 +11524,10 @@ def query_research_rag(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
 
 
 def list_rag_queries(agent_root: Path, project_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -11027,9 +11547,13 @@ def link_claim_reference(agent_root: Path, payload: dict[str, Any]) -> dict[str,
     chunk_id = clean(payload.get("chunk_id"))
     if not project_id or not claim_id or not reference_id:
         raise ValueError("project_id, claim_id, and reference_id are required")
+    get_claim_with_evidence(agent_root, claim_id, project_id)
     citation_number = int(payload.get("citation_number") or 0)
     link_id = clean(payload.get("id")) or stable_id(project_id, claim_id, reference_id, chunk_id, length=24)
     conn = connect(agent_root)
+    if not conn.execute('SELECT 1 FROM "references" WHERE id=? AND project_id=?', (reference_id, project_id)).fetchone():
+        conn.close()
+        raise KeyError("reference not found")
     conn.execute(
         """
         INSERT INTO claim_reference_links(id, project_id, claim_id, reference_id, chunk_id, citation_number, link_type, created_at)
@@ -11044,6 +11568,7 @@ def link_claim_reference(agent_root: Path, payload: dict[str, Any]) -> dict[str,
         agent_root,
         claim_id,
         {
+            "project_id": project_id,
             "evidence_type": "reference",
             "evidence_id": reference_id,
             "evidence_label": f"Reference citation {citation_number}" if citation_number else "Reference",
@@ -11160,6 +11685,7 @@ def create_failure_log(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
 
 
 def list_failure_logs(agent_root: Path, project_id: str = "", search: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -11755,6 +12281,7 @@ def ingest_experiment_log(agent_root: Path, payload: dict[str, Any]) -> dict[str
     return result
 
 def list_experiment_logs(agent_root: Path, project_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -14762,12 +15289,14 @@ def _cross_project_literature_candidates(conn: sqlite3.Connection, agent_root: P
 
 def workspace_state(agent_root: Path, project_id: str = "") -> dict[str, Any]:
     project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
+    require_existing_project(agent_root, project_id)
     conn = connect(agent_root)
     try:
-        if not project_id:
-            row = conn.execute("SELECT id FROM projects WHERE status='active' ORDER BY updated_at DESC LIMIT 1").fetchone()
-            project_id = clean(row["id"]) if row else ""
-        project = normalize_project_row(agent_root, row_to_dict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())) if project_id else {}
+        project = normalize_project_row(agent_root, row_to_dict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()))
+        if not project:
+            raise KeyError("project not found")
 
         pdf_files_found, recent_pdfs = _count_project_pdfs_on_disk(agent_root, project_id)
         references_count = db_count(conn, "references", "project_id=?", (project_id,))
@@ -14987,12 +15516,14 @@ def workspace_state(agent_root: Path, project_id: str = "") -> dict[str, Any]:
                 "total_count": sum(artifact_counts.values()),
                 "by_type": artifact_counts,
             },
+            "workflow_run_count": db_count(conn, "skill_runs", "project_id=?", (project_id,)),
             "workspace_diagnostics": {
                 "warnings": diagnostic_warnings,
                 "current_project_literature": current_inventory,
                 "possible_misassigned_literature": cross_project_candidates,
             },
         }
+        state["project_workspace"] = write_project_workspace_manifest(agent_root, project, state)
         return state
     finally:
         conn.close()
@@ -15308,12 +15839,11 @@ def _decode_inbox_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def list_agent_inbox(agent_root: Path, project_id: str = "", status: str = "", limit: int = 50) -> dict[str, Any]:
     project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     status = clean(status)
-    clauses = ["1=1"]
-    params: list[Any] = []
-    if project_id:
-        clauses.append("project_id=?")
-        params.append(project_id)
+    clauses = ["project_id=?"]
+    params: list[Any] = [project_id]
     if status:
         clauses.append("status=?")
         params.append(status)
@@ -15335,6 +15865,9 @@ def update_agent_inbox_item(agent_root: Path, item_id: str, payload: dict[str, A
     item_id = clean(item_id)
     if not item_id:
         raise ValueError("item_id is required")
+    project_id = clean(payload.get("project_id"))
+    if not project_id:
+        raise ValueError("project_id is required")
     allowed_status = {"unread", "read", "ignored", "dismissed", "accepted"}
     status = clean(payload.get("status"))
     if status and status not in allowed_status:
@@ -15350,11 +15883,11 @@ def update_agent_inbox_item(agent_root: Path, item_id: str, payload: dict[str, A
     if not assignments:
         raise ValueError("no supported inbox fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), item_id])
+    values.extend([now(), item_id, project_id])
     conn = connect(agent_root)
     try:
-        conn.execute(f"UPDATE agent_inbox_items SET {', '.join(assignments)} WHERE id=?", values)
-        row = conn.execute("SELECT * FROM agent_inbox_items WHERE id=?", (item_id,)).fetchone()
+        conn.execute(f"UPDATE agent_inbox_items SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+        row = conn.execute("SELECT * FROM agent_inbox_items WHERE id=? AND project_id=?", (item_id, project_id)).fetchone()
         if not row:
             raise KeyError("inbox item not found")
         conn.commit()
@@ -16677,7 +17210,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("message is required")
     developer_debug = bool(payload.get("developer_debug") or payload.get("debug_mode") or payload.get("include_internal_ids")) or developer_debug_mode_enabled()
 
-    ensure_default_chat_project(agent_root, project_id)
+    get_project_detail(agent_root, project_id)
     requested_conversation_id = clean(payload.get("conversation_id") or payload.get("session_id"))
     conversation = ensure_chat_session(agent_root, project_id, requested_conversation_id, title=message[:80])
     conversation_id = conversation["id"]
@@ -17577,7 +18110,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
                 "force_new": True,
             },
         )
-        run_result = run_agent_task(agent_root, task["task_id"], {"message": message})
+        run_result = run_agent_task(agent_root, task["task_id"], {"project_id": project_id, "message": message})
         task_status = latest_task_status(agent_root, project_id, limit=8)
         draft = ((run_result.get("result") or {}).get("skill_draft") if isinstance(run_result.get("result"), dict) else {}) or {}
         answer = "已根据最近执行记录生成一个 skill 草稿，放入 Research Feed 审阅。它还没有激活，确认前不会写入正式 Skill Registry。"
@@ -17634,7 +18167,7 @@ def agent_chat(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
                     "force_new": True,
                 },
             )
-            run_result = run_agent_task(agent_root, agent_task["task_id"], {"approved": True})
+            run_result = run_agent_task(agent_root, agent_task["task_id"], {"project_id": project_id, "approved": True})
         except Exception as exc:  # noqa: BLE001
             return finalize({
                 "ok": False,
@@ -17931,6 +18464,7 @@ def upsert_weekly_digest_config(agent_root: Path, payload: dict[str, Any]) -> di
 
 
 def list_weekly_digest_configs(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -18332,6 +18866,7 @@ def run_scheduled_weekly_digest(agent_root: Path, force: bool = False, project_i
 
 
 def list_weekly_digest_reports(agent_root: Path, project_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -18576,7 +19111,7 @@ def list_evidence_review_items(agent_root: Path, project_id: str, filters: dict[
     return {"project_id": project_id, "evidence_items": filtered, "count": len(filtered)}
 
 
-def get_evidence_item(agent_root: Path, evidence_id: str) -> dict[str, Any]:
+def get_evidence_item(agent_root: Path, evidence_id: str, project_id: str | None = None) -> dict[str, Any]:
     evidence_type, raw_id = parse_evidence_key(evidence_id)
     if not evidence_type or not raw_id:
         raise ValueError("evidence_id must use evidence_type:id")
@@ -18620,13 +19155,20 @@ def get_evidence_item(agent_root: Path, evidence_id: str) -> dict[str, Any]:
     if not row:
         conn.close()
         raise KeyError("evidence item not found")
+    if project_id is not None:
+        try:
+            ensure_project_record(row, require_project_id(project_id), "evidence item")
+        except Exception:
+            conn.close()
+            raise
     item = evidence_item_from_row(conn, evidence_type, row)
     conn.close()
     return item
 
 
 def mark_evidence_reviewed(agent_root: Path, evidence_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    item = get_evidence_item(agent_root, evidence_id)
+    project_id = require_project_id(payload)
+    item = get_evidence_item(agent_root, evidence_id, project_id)
     timestamp = now()
     review = {
         "id": stable_id(item["evidence_id"], "review", length=24),
@@ -18658,14 +19200,16 @@ def mark_evidence_reviewed(agent_root: Path, evidence_id: str, payload: dict[str
     conn.commit()
     saved = row_to_dict(conn.execute("SELECT * FROM evidence_reviews WHERE evidence_key=?", (item["evidence_id"],)).fetchone()) or {}
     conn.close()
-    return {"evidence": get_evidence_item(agent_root, evidence_id), "review": saved}
+    return {"evidence": get_evidence_item(agent_root, evidence_id, project_id), "review": saved}
 
 
 def link_evidence_item_to_claim(agent_root: Path, evidence_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     claim_id = clean(payload.get("claim_id"))
     if not claim_id:
         raise ValueError("claim_id is required")
-    item = get_evidence_item(agent_root, evidence_id)
+    get_claim_with_evidence(agent_root, claim_id, project_id)
+    item = get_evidence_item(agent_root, evidence_id, project_id)
     claim_evidence_type = item["evidence_type"]
     raw_id = item["raw_id"]
     linked = add_claim_evidence(
@@ -18678,9 +19222,10 @@ def link_evidence_item_to_claim(agent_root: Path, evidence_id: str, payload: dic
             "evidence_label": item.get("friendly_evidence_label"),
             "metadata": {"evidence_review_id": item["evidence_id"], "evidence_type": item["evidence_type"]},
             "confidence": payload.get("confidence") or 0.65,
+            "project_id": project_id,
         },
     )
-    return {"claim_evidence": linked, "evidence": get_evidence_item(agent_root, evidence_id)}
+    return {"claim_evidence": linked, "evidence": get_evidence_item(agent_root, evidence_id, project_id)}
 
 
 def evidence_label_glossary() -> dict[str, str]:
@@ -19786,7 +20331,7 @@ def run_imported_core_skill_adapter(agent_root: Path, folder: str, skill: dict[s
         if not file_id:
             file_record = register_file(agent_root, {"project_id": project_id, "filename": clean(payload.get("filename")) or "domain_entities.txt", "content": clean(payload.get("text") or payload.get("content")), "category": payload.get("category") or "experiment log"})
             file_id = file_record["id"]
-        extraction = run_extraction(agent_root, {"file_id": file_id, "skill_run_id": run_id})
+        extraction = run_extraction(agent_root, {"project_id": project_id, "file_id": file_id, "skill_run_id": run_id})
         result.update(extraction)
         output_refs.append({"type": "file", "id": file_id})
         output_refs.extend({"type": "memory_entity", "id": entity["id"]} for entity in extraction.get("entities", []))
@@ -19797,8 +20342,8 @@ def run_imported_core_skill_adapter(agent_root: Path, folder: str, skill: dict[s
             filename = clean(payload.get("file_name") or payload.get("filename")) or "scientific_data.csv"
             file_record = register_file(agent_root, {"project_id": project_id, "filename": filename, "content": content, "category": payload.get("category") or "Excel spreadsheet"})
             file_id = file_record["id"]
-        extraction = run_extraction(agent_root, {"file_id": file_id, "skill_run_id": run_id})
-        file_record = read_file_record(agent_root, file_id)
+        extraction = run_extraction(agent_root, {"project_id": project_id, "file_id": file_id, "skill_run_id": run_id})
+        file_record = read_file_record(agent_root, file_id, project_id)
         result.update({"file": file_record, "extraction": extraction})
         output_refs.append({"type": "file", "id": file_id})
         if file_record.get("data_context"):
@@ -19843,7 +20388,7 @@ def run_imported_core_skill_adapter(agent_root: Path, folder: str, skill: dict[s
             protocol = store_protocol(agent_root, {**parsed["protocol"], "skill_run_id": run_id})
             protocol_id = protocol["id"]
             output_refs.append({"type": "protocol", "id": protocol_id})
-        package = generate_execution_package(agent_root, {"protocol_id": protocol_id, "skill_run_id": run_id})
+        package = generate_execution_package(agent_root, {"project_id": project_id, "protocol_id": protocol_id, "skill_run_id": run_id})
         result.update({"execution_package": package})
         output_refs.append({"type": "protocol_execution_package", "id": package["id"]})
     elif folder == "research-agent-runtime":
@@ -19923,7 +20468,7 @@ def run_skill(agent_root: Path, skill_id: str, project_id: str = "", input_paylo
             )
         elif handler == "DataNamingConventionSkill":
             if payload.get("protocol_id"):
-                protocol = get_protocol(agent_root, clean(payload["protocol_id"]))
+                protocol = get_protocol(agent_root, clean(payload["protocol_id"]), project_id)
                 project = get_project_detail(agent_root, protocol["project_id"])
                 pattern = generate_naming_convention(project["title"], protocol)
                 refs.append({"type": "protocol", "id": protocol["id"]})
@@ -20005,6 +20550,9 @@ def run_skill_example(agent_root: Path, skill_id: str, payload: dict[str, Any]) 
 
 
 def list_skill_runs(agent_root: Path, project_id: str = "", skill_id: str = "", status: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -20023,9 +20571,17 @@ def list_skill_runs(agent_root: Path, project_id: str = "", skill_id: str = "", 
     return rows
 
 
-def get_skill_run(agent_root: Path, skill_run_id: str) -> dict[str, Any]:
+def get_skill_run(agent_root: Path, skill_run_id: str, project_id: str | None = None) -> dict[str, Any]:
+    params: list[Any] = [skill_run_id]
+    query = "SELECT * FROM skill_runs WHERE id=?"
+    if project_id is not None:
+        project_id = clean(project_id)
+        if not project_id:
+            raise ValueError("project_id is required")
+        query += " AND project_id=?"
+        params.append(project_id)
     conn = connect(agent_root)
-    row = row_to_dict(conn.execute("SELECT * FROM skill_runs WHERE id=?", (skill_run_id,)).fetchone())
+    row = row_to_dict(conn.execute(query, params).fetchone())
     if not row:
         conn.close()
         raise KeyError("skill run not found")
@@ -20036,6 +20592,9 @@ def get_skill_run(agent_root: Path, skill_run_id: str) -> dict[str, Any]:
 
 
 def list_execution_memory(agent_root: Path, project_id: str = "", skill_id: str = "", status: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    project_id = clean(project_id)
+    if not project_id:
+        raise ValueError("project_id is required")
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -20056,8 +20615,9 @@ def list_execution_memory(agent_root: Path, project_id: str = "", skill_id: str 
 
 def promote_execution_memory_to_skill_draft(agent_root: Path, execution_memory_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
+    project_id = require_project_id(payload)
     conn = connect(agent_root)
-    memory = row_to_dict(conn.execute("SELECT * FROM execution_memory WHERE id=?", (execution_memory_id,)).fetchone())
+    memory = row_to_dict(conn.execute("SELECT * FROM execution_memory WHERE id=? AND project_id=?", (execution_memory_id, project_id)).fetchone())
     conn.close()
     if not memory:
         raise KeyError("execution memory not found")
@@ -20098,6 +20658,10 @@ def promote_execution_memory_to_skill_draft(agent_root: Path, execution_memory_i
 
 
 def list_agent_memory(agent_root: Path, scope: str = "", project_id: str = "", include_disabled: bool = False) -> dict[str, Any]:
+    scope = clean(scope)
+    project_id = clean(project_id)
+    if scope != "system" and not project_id:
+        raise ValueError("project_id is required")
     clauses = ["1=1"]
     params: list[Any] = []
     if scope:
@@ -20258,6 +20822,8 @@ def create_agent_memory_entry(agent_root: Path, payload: dict[str, Any]) -> dict
         project_id = ""
     elif not project_id:
         raise ValueError("project_id is required for project-level agent memory")
+    else:
+        require_existing_project(agent_root, project_id)
     title = clean(payload.get("title"))
     if not title:
         raise ValueError("title is required")
@@ -20307,6 +20873,7 @@ def create_agent_memory_entry(agent_root: Path, payload: dict[str, Any]) -> dict
 
 
 def update_agent_memory_entry(agent_root: Path, entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     allowed = {"title", "content", "structured_content_json", "confidence", "trust_level", "status"}
     assignments: list[str] = []
     values: list[Any] = []
@@ -20319,10 +20886,10 @@ def update_agent_memory_entry(agent_root: Path, entry_id: str, payload: dict[str
     if not assignments:
         raise ValueError("no supported memory fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), entry_id])
+    values.extend([now(), entry_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE agent_memory_entries SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM agent_memory_entries WHERE id=?", (entry_id,)).fetchone()
+    conn.execute(f"UPDATE agent_memory_entries SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM agent_memory_entries WHERE id=? AND project_id=?", (entry_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("agent memory entry not found")
@@ -20334,13 +20901,11 @@ def update_agent_memory_entry(agent_root: Path, entry_id: str, payload: dict[str
 
 
 def parse_kit_template(agent_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    project_id = clean(payload.get("project_id"))
+    project_id = require_project_id(payload)
     source_file_id = clean(payload.get("source_file_id"))
     text = clean(payload.get("text") or payload.get("content"))
     filename = clean(payload.get("filename")) or "kit_template.txt"
     if not source_file_id:
-        if not project_id:
-            raise ValueError("project_id is required when source_file_id is not provided")
         file_record = register_file(
             agent_root,
             {
@@ -20354,8 +20919,7 @@ def parse_kit_template(agent_root: Path, payload: dict[str, Any]) -> dict[str, A
         source_file_id = file_record["id"]
         text = file_record.get("extracted_text") or text
     else:
-        file_record = read_file_record(agent_root, source_file_id)
-        project_id = file_record["project_id"]
+        file_record = read_file_record(agent_root, source_file_id, project_id)
         text = file_record.get("extracted_text") or text
         filename = file_record["original_filename"]
     assay_type = clean(payload.get("assay_type")) or classify_file(filename, text).replace(" data", "").replace("Excel spreadsheet", "template")
@@ -20482,11 +21046,12 @@ def find_relevant_kit_templates(agent_root: Path, project_id: str, assay_type: s
 
 
 def list_kit_templates(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     conn = connect(agent_root)
     rows = rows_to_dicts(
         conn.execute(
-            "SELECT * FROM kit_templates WHERE (?='' OR project_id=?) ORDER BY updated_at DESC",
-            (project_id, project_id),
+            "SELECT * FROM kit_templates WHERE project_id=? ORDER BY updated_at DESC",
+            (project_id,),
         ).fetchall()
     )
     conn.close()
@@ -20494,6 +21059,7 @@ def list_kit_templates(agent_root: Path, project_id: str = "") -> list[dict[str,
 
 
 def update_kit_template(agent_root: Path, template_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     allowed = {
         "name",
         "vendor",
@@ -20524,10 +21090,10 @@ def update_kit_template(agent_root: Path, template_id: str, payload: dict[str, A
     if not assignments:
         raise ValueError("no supported kit template fields to update")
     assignments.append("updated_at=?")
-    values.extend([now(), template_id])
+    values.extend([now(), template_id, project_id])
     conn = connect(agent_root)
-    conn.execute(f"UPDATE kit_templates SET {', '.join(assignments)} WHERE id=?", values)
-    row = conn.execute("SELECT * FROM kit_templates WHERE id=?", (template_id,)).fetchone()
+    conn.execute(f"UPDATE kit_templates SET {', '.join(assignments)} WHERE id=? AND project_id=?", values)
+    row = conn.execute("SELECT * FROM kit_templates WHERE id=? AND project_id=?", (template_id, project_id)).fetchone()
     if not row:
         conn.close()
         raise KeyError("kit template not found")
@@ -20537,6 +21103,7 @@ def update_kit_template(agent_root: Path, template_id: str, payload: dict[str, A
 
 
 def list_data_contexts(agent_root: Path, project_id: str = "", context_status: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     clauses = ["1=1"]
     params: list[Any] = []
     if project_id:
@@ -20552,6 +21119,7 @@ def list_data_contexts(agent_root: Path, project_id: str = "", context_status: s
 
 
 def list_under_contextualized_files(agent_root: Path, project_id: str = "") -> list[dict[str, Any]]:
+    project_id = require_project_id(project_id)
     conn = connect(agent_root)
     rows = rows_to_dicts(
         conn.execute(
@@ -20559,10 +21127,10 @@ def list_under_contextualized_files(agent_root: Path, project_id: str = "") -> l
             SELECT d.*, f.original_filename, f.detected_document_category, f.file_path
             FROM data_contexts d
             JOIN research_files f ON f.id=d.file_id
-            WHERE d.context_status='under_contextualized' AND (?='' OR d.project_id=?)
+            WHERE d.context_status='under_contextualized' AND d.project_id=?
             ORDER BY d.updated_at DESC
             """,
-            (project_id, project_id),
+            (project_id,),
         ).fetchall()
     )
     conn.close()
@@ -20570,6 +21138,7 @@ def list_under_contextualized_files(agent_root: Path, project_id: str = "") -> l
 
 
 def update_data_context(agent_root: Path, context_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    project_id = require_project_id(payload)
     allowed = {
         "experiment_id",
         "experiment_name",
@@ -20589,7 +21158,7 @@ def update_data_context(agent_root: Path, context_id: str, payload: dict[str, An
         "related_reports",
     }
     conn = connect(agent_root)
-    row = row_to_dict(conn.execute("SELECT * FROM data_contexts WHERE id=?", (context_id,)).fetchone())
+    row = row_to_dict(conn.execute("SELECT * FROM data_contexts WHERE id=? AND project_id=?", (context_id, project_id)).fetchone())
     if not row:
         conn.close()
         raise KeyError("data context not found")
@@ -20698,12 +21267,9 @@ def update_data_context(agent_root: Path, context_id: str, payload: dict[str, An
     return saved
 
 
-def file_samples(agent_root: Path, file_id: str) -> dict[str, Any]:
+def file_samples(agent_root: Path, file_id: str, project_id: str | None = None) -> dict[str, Any]:
+    file_record = read_file_record(agent_root, file_id, project_id)
     conn = connect(agent_root)
-    file_record = row_to_dict(conn.execute("SELECT * FROM research_files WHERE id=?", (file_id,)).fetchone())
-    if not file_record:
-        conn.close()
-        raise KeyError("file not found")
     links = rows_to_dicts(
         conn.execute(
             """
@@ -20785,7 +21351,7 @@ def seed_demo(agent_root: Path) -> dict[str, Any]:
     )
     extracted = []
     for file_record in files:
-        extracted.append(run_extraction(agent_root, {"file_id": file_record["id"]}))
+        extracted.append(run_extraction(agent_root, {"project_id": project["id"], "file_id": file_record["id"]}))
     parsed = parse_protocol_text(
         agent_root,
         {
@@ -20796,9 +21362,9 @@ def seed_demo(agent_root: Path) -> dict[str, Any]:
         },
     )
     protocol = store_protocol(agent_root, parsed["protocol"])
-    execution_package = generate_execution_package(agent_root, {"protocol_id": protocol["id"]})
+    execution_package = generate_execution_package(agent_root, {"project_id": project["id"], "protocol_id": protocol["id"]})
     workflow = create_workflow(agent_root, {"project_id": project["id"], "template_key": "protocol_to_execution"})
-    workflow_run = run_workflow(agent_root, workflow["id"])
+    workflow_run = run_workflow(agent_root, workflow["id"], project_id=project["id"])
     conflicts = detect_conflicts(agent_root, project["id"])
     weekly = generate_report(agent_root, {"project_id": project["id"], "report_type": "weekly_report"})
     gap = generate_report(agent_root, {"project_id": project["id"], "report_type": "project_gap_analysis"})

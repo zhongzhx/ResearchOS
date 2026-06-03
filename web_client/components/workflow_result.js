@@ -21,6 +21,10 @@ function projectLabel(projectId) {
 function artifactStatusLabel(artifact) {
   if (artifact.status === "plan_only" || artifact.metadata?.plan_only) return "计划草稿";
   if (artifact.artifact_type === "journal_club_ppt" && !artifact.metadata?.file_url) return "生成 PPT 计划";
+  if (artifact.status === "failed") return "生成失败";
+  if (artifact.status === "deleted") return "已删除";
+  if (artifact.status === "indexed" || artifact.ingest_status === "indexed") return "已入库";
+  if (artifact.status === "registered") return "已登记";
   return "已生成";
 }
 
@@ -36,6 +40,9 @@ function normalizedArtifacts(result, projectId) {
 }
 
 function artifactPreview(artifact) {
+  if (artifact.path) {
+    return `<p class="artifact-path">${escapeHtml(artifact.path)}</p><p class="muted-text">预览类型：${escapeHtml(artifact.preview_type || "file")}</p>`;
+  }
   if (artifact.artifact_type === "publication_figure") {
     return `<div class="artifact-preview figure-preview"><span>SVG 图预览占位</span></div>`;
   }
@@ -44,6 +51,12 @@ function artifactPreview(artifact) {
 }
 
 function artifactActions(artifact) {
+  if (artifact.path) {
+    return `<div class="artifact-actions">
+      <button class="button secondary small" type="button" data-artifact-copy-path="${escapeHtml(artifact.artifact_id)}">复制路径</button>
+      <button class="button ghost small" type="button" data-artifact-continue="${escapeHtml(artifact.artifact_id)}">在 Chat 中继续修改</button>
+    </div>`;
+  }
   const extension = fileExtension(artifact);
   const downloadLabel =
     artifact.artifact_type === "publication_figure"
@@ -74,7 +87,7 @@ function artifactCard(artifact) {
           <span>${escapeHtml(projectLabel(artifact.project_id))}</span>
         </div>
       </div>
-      <span class="badge ${artifact.status === "plan_only" ? "warning" : "success"}">${escapeHtml(artifactStatusLabel(artifact))}</span>
+      <span class="badge ${["plan_only", "failed", "deleted"].includes(artifact.status) ? "warning" : "success"}">${escapeHtml(artifactStatusLabel(artifact))}</span>
     </div>
     ${artifactPreview(artifact)}
     ${artifactActions(artifact)}
@@ -82,7 +95,7 @@ function artifactCard(artifact) {
 }
 
 export function renderWorkflowResult(result = {}, options = {}) {
-  const projectId = options.projectId || result.project_id || "default";
+  const projectId = options.projectId || result.project_id || "";
   const artifacts = normalizedArtifacts(result, projectId);
   const title = result.title || "科研交付物";
   const message = result.message || result.result_summary || "任务结果已整理为可保存的交付物。";
@@ -123,8 +136,15 @@ function downloadArtifact(artifact, extension) {
   URL.revokeObjectURL(link.href);
 }
 
-export function bindWorkflowResultActions(root, { projectId = "default", artifacts = [] } = {}) {
+export function bindWorkflowResultActions(root, { projectId = "", artifacts = [] } = {}) {
   const artifactById = new Map(artifacts.map((artifact) => [artifact.artifact_id, normalizeArtifact(projectId || artifact.project_id, artifact)]));
+  root.querySelectorAll("[data-artifact-copy-path]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const artifact = artifactById.get(button.dataset.artifactCopyPath);
+      if (!artifact) return;
+      await navigator.clipboard?.writeText?.(artifact.path || "");
+    });
+  });
   root.querySelectorAll("[data-artifact-copy]").forEach((button) => {
     button.addEventListener("click", async () => {
       const artifactId = button.dataset.artifactCopy;

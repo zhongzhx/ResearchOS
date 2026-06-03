@@ -124,7 +124,9 @@ function nowIso() {
 }
 
 function safeProjectId(projectId) {
-  return String(projectId || "default").trim() || "default";
+  const normalized = String(projectId || "").trim();
+  if (!normalized) throw new Error("project_id is required");
+  return normalized;
 }
 
 function safeText(value, fallback = "") {
@@ -214,9 +216,21 @@ export function normalizeArtifact(projectId, artifact = {}) {
     artifact_id: artifact.artifact_id || artifact.id || generateArtifactId({ ...artifact, artifact_type: artifactType }),
     project_id: normalizedProjectId,
     workflow_id: artifact.workflow_id || artifact.source_workflow_id || "",
+    run_id: artifact.run_id || artifact.skill_run_id || "",
     artifact_type: artifactType,
-    title: safeText(artifact.title || typeDefinition.label, "科研交付物"),
+    source_type: artifact.source_type || artifactType,
+    title: safeText(artifact.display_name || artifact.title || typeDefinition.label, "科研交付物"),
+    display_name: safeText(artifact.display_name || artifact.title || typeDefinition.label, "科研交付物"),
     content: safeText(artifact.content || artifact.content_markdown || artifact.body, ""),
+    path: artifact.path || artifact.absolute_path || "",
+    absolute_path: artifact.absolute_path || artifact.path || "",
+    relative_path: artifact.relative_path || "",
+    mime_type: artifact.mime_type || "",
+    preview_type: artifact.preview_type || typeDefinition.preview || typeDefinition.format || "file",
+    size_bytes: Number(artifact.size_bytes || 0),
+    ingest_status: artifact.ingest_status || "registered",
+    kb_status: artifact.kb_status || "not_indexed",
+    rag_status: artifact.rag_status || "not_indexed",
     created_at: createdAt,
     source_intent: artifact.source_intent || artifact.intent || artifact.workflow_id || "",
     status: artifact.status || "completed",
@@ -270,6 +284,6 @@ export function createArtifactsForWorkflowResult(workflow = {}, result = {}, opt
 }
 
 export function saveWorkflowArtifacts(projectId, workflow = {}, result = {}) {
-  const artifacts = Array.isArray(result?.artifacts) && result.artifacts.length ? result.artifacts : createArtifactsForWorkflowResult(workflow, result, { projectId });
+  const artifacts = Array.isArray(result?.artifacts) ? result.artifacts : [];
   return artifacts.map((artifact) => saveArtifactToProject(projectId || artifact.project_id, artifact));
 }
